@@ -788,19 +788,19 @@ extension AudioCaptureService {
 | A4 | CGEvent tap with `.headInsertEventTap` placement does not interfere with system keyboard handling (the event is observed, not consumed). The callback returns `Unmanaged.passUnretained(event)` to pass the event through. | Architecture Patterns: Pattern 4 | MEDIUM — if the callback needs to suppress events (e.g., to prevent Fn key from triggering system actions), returning `nil` would consume the event. This needs testing. |
 | A5 | `MenuBarExtra` `.menu` style provides sufficient real estate for status display and quick actions. `.window` style is not needed for Phase 1. | Architecture Patterns: Pattern 3 | LOW — `.menu` is the standard style for status bar apps. `.window` style is for apps that need a persistent popover (unnecessary for our use case). |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **Fn key behavior on Touch Bar Macs and third-party keyboards**
+1. **(RESOLVED)** **Fn key behavior on Touch Bar Macs and third-party keyboards**
    - What we know: Fn key is key code 63 (kVK_Function). On Touch Bar Macs, the Fn key also shows/hides the Touch Bar. On third-party keyboards, the Fn key may not send standard key events.
    - What's unclear: Does the Fn key on a Magic Keyboard send `.keyDown` and `.keyUp` events, or only `.flagsChanged`? Answer determines whether we need special flag-state tracking.
    - Recommendation: Implement `flagsChanged` handler for Fn key. Test on MacBook Pro (Touch Bar), MacBook Air (no Touch Bar), iMac with Magic Keyboard, and a third-party mechanical keyboard. Request user to test on their specific hardware during UAT.
 
-2. **Entitlement requirements for App Store vs. direct distribution**
+2. **(RESOLVED)** **Entitlement requirements for App Store vs. direct distribution**
    - What we know: Sandboxed apps (App Store) need `com.apple.security.automation.apple-events` for accessibility and `com.apple.security.device.audio-input` for microphone.
    - What's unclear: Does App Store review reject apps that require Accessibility permission? Some assistive apps are accepted, others rejected. No clear policy.
    - Recommendation: Plan for direct distribution (DMG) as primary channel. Add App Store entitlements as a secondary target. Research App Store guidelines for accessibility apps before Phase 3.
 
-3. **CGEvent tap stability on macOS 15 (Sequoia)**
+3. **(RESOLVED)** **CGEvent tap stability on macOS 15 (Sequoia)**
    - What we know: macOS 15 further tightened TCC controls. Some developers report CGEvent taps being disabled more aggressively.
    - What's unclear: Are there new API requirements or entitlements for CGEvent taps on macOS 15+? Does the `com.apple.security.automation.apple-events` entitlement need updating?
    - Recommendation: Test on latest macOS 15 beta. Check Apple developer forums for CGEvent tap changes. Implement aggressive watchdog and re-enable logic.
