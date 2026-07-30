@@ -20,8 +20,8 @@ Requirements for initial release. Each maps to roadmap phases.
 - [ ] **HOTK-02**: User can press correction hotkey to enter correction mode (separate from dictation)
 - [ ] **HOTK-03**: Hotkeys work globally across all applications (system-level CGEvent tap)
 - [ ] **HOTK-04**: App detects and alerts user when hotkey permissions are lost (e.g. after OS update)
-- [ ] **AUDI-01**: App captures audio from default microphone at 16kHz mono
-- [ ] **AUDI-02**: App handles audio device hot-plug gracefully (AirPods disconnect, USB mic unplug)
+- [x] **AUDI-01**: App captures audio from default microphone at 16kHz mono
+- [x] **AUDI-02**: App handles audio device hot-plug gracefully (AirPods disconnect, USB mic unplug)
 
 ### Core Dictation
 
@@ -100,8 +100,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | HOTK-02 | Phase 1 | Pending |
 | HOTK-03 | Phase 1 | Pending |
 | HOTK-04 | Phase 1 | Pending |
-| AUDI-01 | Phase 1 | Pending |
-| AUDI-02 | Phase 1 | Pending |
+| AUDI-01 | Phase 1 | Complete |
+| AUDI-02 | Phase 1 | Complete |
 | DICT-01 | Phase 2 | Pending |
 | DICT-02 | Phase 2 | Pending |
 | DICT-03 | Phase 2 | Pending |
