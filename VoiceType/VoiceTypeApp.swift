@@ -35,11 +35,17 @@ struct VoiceTypeApp: App {
         .windowResizability(.contentSize)
         .defaultPosition(.center)
 
-        // D-02: Standalone settings window (auto-integrates with App menu → Settings...).
-        Settings {
+        // D-02: Standalone settings window.
+        // Uses Window scene with explicit id instead of Settings scene because
+        // LSUIElement apps (menu bar only, no Dock icon) cannot reliably trigger
+        // the Settings scene via NSApp.sendAction(showSettingsWindow:).
+        // The MenuBarView opens this via openSettings environment action.
+        Window("Settings", id: "settings") {
             SettingsView()
                 .environmentObject(coordinator)
         }
+        .windowResizability(.contentSize)
+        .defaultPosition(.center)
     }
 }
 

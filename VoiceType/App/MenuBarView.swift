@@ -4,6 +4,7 @@ import SwiftUI
 /// Shows current application status, permission indicators, and quick actions.
 struct MenuBarView: View {
     @EnvironmentObject var coordinator: AppCoordinator
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -68,6 +69,18 @@ struct MenuBarView: View {
 
     private var actionsSection: some View {
         VStack(spacing: 4) {
+            // Open permissions gate manually if permissions are missing
+            if !coordinator.permissionManager.allPermissionsGranted {
+                Button(action: openPermissionGate) {
+                    HStack {
+                        Image(systemName: "lock.shield")
+                        Text("Open Permissions...")
+                        Spacer()
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+
             Button(action: openSettings) {
                 HStack {
                     Image(systemName: "gearshape")
@@ -101,13 +114,24 @@ struct MenuBarView: View {
         }
     }
 
-    /// Open the Settings window via the standard macOS app menu action.
-    /// Uses `NSApp.sendAction` with the Settings scene selector.
+    /// Open the Settings window via the openWindow environment action.
+    /// Uses Window scene id "settings" defined in VoiceTypeApp.swift.
     private func openSettings() {
         Log.app.info("Menu bar: Open Settings requested")
-        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
-        // Also activate the app so the settings window comes to the foreground
-        NSApp.activate(ignoringOtherApps: true)
+        openWindow(id: "settings")
+        DispatchQueue.main.async {
+            NSApp.activate(ignoringOtherApps: true)
+        }
+    }
+
+    /// Open the permission gate window so the user can grant permissions.
+    /// This is the manual fallback for when the auto-open on first launch fails.
+    private func openPermissionGate() {
+        Log.app.info("Menu bar: Open Permissions requested")
+        openWindow(id: "permission-gate")
+        DispatchQueue.main.async {
+            NSApp.activate(ignoringOtherApps: true)
+        }
     }
 
     /// Gracefully terminate the application.
