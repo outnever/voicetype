@@ -6,7 +6,7 @@ VoiceType 从零开始构建——一个 macOS 系统级语音输入与 AI 纠�
 
 ## Phases
 
-- [ ] **Phase 1: Foundation** - 应用框架、权限流程、全局热键、音频采集全部就绪
+- [x] **Phase 1: Foundation** - 应用框架、权限流程、全局热键、音频采集全部就绪 (completed 2026-07-30)
 - [ ] **Phase 2: Core Dictation** - 按住热键说话，松手后语音转文字输入到任意应用
 - [ ] **Phase 3: AI Correction** - 按纠错键说出自然语言指令，AI 原地修正错误文字
 
@@ -26,12 +26,12 @@ VoiceType 从零开始构建——一个 macOS 系统级语音输入与 AI 纠�
   4. 用户保存的 API 密钥存储在 macOS 钥匙串中，设置界面仅显示脱敏信息
   5. 用户从任意应用按住听写热键，应用能正确检测按键按下与释放并切换状态
 
-**Plans**: 2/3 plans executed
+**Plans**: 3/3 plans complete
 
 Plans:
 
 - [x] 01-01-PLAN.md — App Shell: Xcode 工程、菜单栏、权限引导、设置窗口、Keychain 密钥存储（SHEL-01~04）
-- [ ] 01-02-PLAN.md — Hotkey System: CGEvent tap 全局热键（Fn + Ctrl+Shift+C）+ Watchdog 权限监控（HOTK-01~04）
+- [x] 01-02-PLAN.md — Hotkey System: CGEvent tap 全局热键（Fn + Ctrl+Shift+C）+ Watchdog 权限监控（HOTK-01~04）
 - [x] 01-03-PLAN.md — Audio Capture: AVAudioEngine 音频采集管线（16kHz mono）+ 设备热插拔处理（AUDI-01~02）
 
 **UI hint**: yes
@@ -76,6 +76,6 @@ Phases execute in numeric order: 1 → 2 → 3
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Foundation | 2/3 | In Progress|  |
+| 1. Foundation | 3/3 | Complete   | 2026-07-30 |
 | 2. Core Dictation | 0/0 | Not started | - |
 | 3. AI Correction | 0/0 | Not started | - |

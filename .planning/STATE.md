@@ -6,15 +6,15 @@ current_phase: 1
 current_phase_name: Foundation
 status: verifying
 stopped_at: Phase 1 context gathered
-last_updated: "2026-07-30T12:18:30.099Z"
+last_updated: "2026-07-30T12:20:22.254Z"
 last_activity: 2026-07-30
 last_activity_desc: Roadmap created with 3 phases, 29 requirements mapped
 progress:
   total_phases: 3
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 3
-  completed_plans: 2
-  percent: 0
+  completed_plans: 3
+  percent: 33
 ---
 
 # Project State
@@ -56,6 +56,7 @@ Progress: [░░░░░░░░░░] 0%
 - No plans executed yet.
 
 *Updated after each plan completion*
+| Phase 01-foundation P02 | 5m34s | - tasks | - files |
 
 ## Accumulated Context
 
@@ -67,6 +68,8 @@ Recent decisions affecting current work:
 - [Init]: macOS 优先，Swift 6.x + SwiftUI 原生架构，WhisperKit 本地识别 + 云端大模型纠错
 - [Init]: 系统级 API（CGEvent、AXUIElement）而非编辑器插件，保证任意应用可用
 - [Init]: 自然语言纠错指令（非固定命令），降低学习成本
+- [Phase ?]: CGEvent.tapCreate on dedicated RunLoop thread for hold-to-talk and press-to-trigger global hotkeys
+- [Phase ?]: Single-fire correction hotkey resets on C key-up to allow repeated triggers while modifiers held
 
 ### Pending Todos
 
@@ -86,6 +89,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-07-30T12:18:30.093Z
+Last session: 2026-07-30T12:20:22.250Z
 Stopped at: Phase 1 context gathered
 Resume file: .planning/phases/01-foundation/01-CONTEXT.md
