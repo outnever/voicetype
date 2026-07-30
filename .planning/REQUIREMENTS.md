@@ -9,10 +9,10 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Application Shell & Permissions
 
-- [ ] **SHEL-01**: User sees menu bar icon on app launch within 1 second
-- [ ] **SHEL-02**: User is guided through first-run permission flows (microphone + accessibility)
-- [ ] **SHEL-03**: User can access settings window from menu bar to configure preferences
-- [ ] **SHEL-04**: API keys stored securely in macOS Keychain (never in UserDefaults or plaintext)
+- [x] **SHEL-01**: User sees menu bar icon on app launch within 1 second
+- [x] **SHEL-02**: User is guided through first-run permission flows (microphone + accessibility)
+- [x] **SHEL-03**: User can access settings window from menu bar to configure preferences
+- [x] **SHEL-04**: API keys stored securely in macOS Keychain (never in UserDefaults or plaintext)
 
 ### Audio & Hotkeys
 
@@ -92,10 +92,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| SHEL-01 | Phase 1 | Pending |
-| SHEL-02 | Phase 1 | Pending |
-| SHEL-03 | Phase 1 | Pending |
-| SHEL-04 | Phase 1 | Pending |
+| SHEL-01 | Phase 1 | Complete |
+| SHEL-02 | Phase 1 | Complete |
+| SHEL-03 | Phase 1 | Complete |
+| SHEL-04 | Phase 1 | Complete |
 | HOTK-01 | Phase 1 | Pending |
 | HOTK-02 | Phase 1 | Pending |
 | HOTK-03 | Phase 1 | Pending |
@@ -123,6 +123,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | UXFE-03 | Phase 2 | Pending |
 
 **Coverage:**
+
 - v1 requirements: 29 total
 - Mapped to phases: 29
 - Unmapped: 0 ✓
