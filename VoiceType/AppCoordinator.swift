@@ -127,6 +127,69 @@ final class AppCoordinator: ObservableObject {
         }
     }
 
+    /// Wires HotkeyManager callbacks to AppCoordinator state transitions.
+    ///
+    /// Callbacks are dispatched from the HotkeyManager's tap thread to the main
+    /// thread via DispatchQueue.main.async (enforced by HotkeyManager), so state
+    /// mutations here are safe on @MainActor.
+    private func setupHotkeyCallbacks() {
+        hotkeyManager.coordinator = self
+
+        // Dictation: Fn key hold-to-talk (D-03)
+        hotkeyManager.onDictationKeyDown = { [weak self] in
+            guard let self else { return }
+            Log.app.info("Dictation hotkey pressed — transitioning to .recording")
+            self.state = .recording
+            self.statusMessage = "Recording..."
+        }
+
+        hotkeyManager.onDictationKeyUp = { [weak self] in
+            guard let self else { return }
+            Log.app.info("Dictation hotkey released — transitioning to .idle")
+            // Phase 2: audio capture stop + transcription will be inserted here
+            self.state = .idle
+            self.statusMessage = "Ready"
+        }
+
+        // Correction: Ctrl+Shift+C press-to-trigger (D-04)
+        hotkeyManager.onCorrectionKeyPress = { [weak self] in
+            guard let self else { return }
+            Log.app.info("Correction hotkey pressed — transitioning to .correcting")
+            // Phase 3: AI correction pipeline will be inserted here
+            self.state = .correcting
+            self.statusMessage = "Correcting..."
+            // Auto-reset after a short delay (placeholder until Phase 3 implementation)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
+                if self?.state == .correcting {
+                    self?.state = .idle
+                    self?.statusMessage = "Ready"
+                }
+            }
+        }
+
+        Log.app.info("Hotkey callbacks wired to AppCoordinator")
+    }
+
+    /// Sets up NotificationCenter observers for hotkey subsystem health.
+    /// Listens for CGEvent tap disable events from the watchdog (D-06, HOTK-04).
+    private func setupHotkeyObservers() {
+        // Hotkey tap disabled — OS revoked permissions or tap silently failed
+        NotificationCenter.default.addObserver(
+            forName: .hotkeyTapDisabled,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                Log.app.warning("Hotkey tap disabled — updating UI to warn user")
+                self.hotkeyTapActive = false
+                self.statusMessage = "Hotkey permission lost — re-grant in System Settings → Privacy → Accessibility"
+            }
+        }
+
+        Log.app.info("Hotkey health observers registered")
+    }
+
     /// Perform all slow initialization work on a background task.
     /// Permission checks, model loading, keychain reads — anything that
     /// might block or trigger system dialogs belongs here.
@@ -152,6 +215,20 @@ final class AppCoordinator: ObservableObject {
             if self?.permissionManager.allPermissionsGranted == true {
                 self?.statusMessage = "Ready"
                 Log.app.info("All permissions granted — VoiceType ready")
+
+                // Register global hotkeys now that permissions are confirmed.
+                // If registration fails (e.g., CGEvent tap creation), the app
+                // remains functional without hotkeys and the user is notified
+                // via the permission gate UI.
+                do {
+                    try self?.hotkeyManager.register()
+                    self?.hotkeyTapActive = true
+                    self?.hotkeyManager.startWatchdog()
+                    Log.app.info("HotkeyManager registered and watchdog started")
+                } catch {
+                    Log.app.error("HotkeyManager registration failed: \(error.localizedDescription)")
+                    self?.hotkeyTapActive = false
+                }
             } else {
                 self?.statusMessage = "Permissions needed"
                 Log.app.info("Some permissions missing — user needs to complete setup")
