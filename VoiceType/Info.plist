@@ -20,6 +20,8 @@
 	<string>1</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>14.0</string>
+	<key>LSUIElement</key>
+	<true/>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>VoiceType 需要用麦克风将你说的转化成文字。录音仅在按住听写键时进行，数据不会上传或存储。</string>
 </dict>
