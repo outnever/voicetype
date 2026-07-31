@@ -187,7 +187,13 @@ final class HotkeyManager: @unchecked Sendable {
                 }
                 return true
             }
-            if !down { correctionFired = false }
+            if !down {
+                correctionFired = false
+                // 消费 keyUp，避免中文输入法拦截生成多余字符（如 Ç）
+                if flags.contains(.maskControl), flags.contains(.maskShift) {
+                    return true
+                }
+            }
         }
 
         return false

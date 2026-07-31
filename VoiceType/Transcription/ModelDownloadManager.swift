@@ -49,9 +49,9 @@ final class ModelDownloadManager: ObservableObject {
     /// hf-mirror.com 是 HuggingFace 官方认可的镜像站。
     private static let hfMirrorURL = "https://hf-mirror.com"
 
-    /// 开发默认使用 tiny 模型（75MB）——下载快、够测试。
-    /// 生产环境切换为 "openai_whisper-large-v3-v20240930_626MB"。
-    private static let devModelName = "openai_whisper-tiny"
+    /// 开发默认使用 base 模型（142MB）——中文准确率与速度的平衡点。
+    /// tiny 太小（75MB）中文识别差；生产环境用 "openai_whisper-large-v3-v20240930_626MB"。
+    private static let devModelName = "openai_whisper-base"
 
     /// WhisperKit 默认的本地模型缓存根目录（HubApi 默认值）。
     private static let localModelBase = FileManager.default

@@ -57,9 +57,9 @@ final class TranscriptionService: ObservableObject {
             let results = try await Task.detached(priority: .userInitiated) { () throws -> [TranscriptionResult] in
                 let options = DecodingOptions(
                     task: .transcribe,
-                    detectLanguage: true,        // D-14: auto-detect Chinese/English
+                    language: "zh",               // 强制简体中文，避免识别成繁体/粤语
                     skipSpecialTokens: true,
-                    chunkingStrategy: .vad      // D-05: built-in VAD segmentation
+                    chunkingStrategy: .vad        // D-05: built-in VAD segmentation
                 )
 
                 Log.transcription.info("WhisperKit: starting transcription with VAD chunking")
