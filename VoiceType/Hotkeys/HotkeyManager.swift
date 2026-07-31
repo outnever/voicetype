@@ -30,6 +30,7 @@ final class HotkeyManager: @unchecked Sendable {
     private var correctionFiredInCurrentCycle: Bool = false
     private var lastEventTimestamp: Date = Date()
     private var watchdogTimer: DispatchSourceTimer?
+    private var watchdogAlreadyWarned: Bool = false
 
     private(set) var isRegistered: Bool = false
 
@@ -277,24 +278,26 @@ final class HotkeyManager: @unchecked Sendable {
         let timeSinceLastEvent = Date().timeIntervalSince(lastEventTimestamp)
 
         if !tapEnabled {
-            Log.hotkey.warning("Watchdog: tap 已禁用 — 尝试自动恢复")
             CGEvent.tapEnable(tap: tap, enable: true)
             Thread.sleep(forTimeInterval: 0.1)
             if CGEvent.tapIsEnabled(tap: tap) {
                 Log.hotkey.info("Watchdog: tap 已恢复")
                 lastEventTimestamp = Date()
-            } else {
+                watchdogAlreadyWarned = false
+            } else if !watchdogAlreadyWarned {
                 Log.hotkey.error("Watchdog: 恢复失败")
                 DispatchQueue.main.async {
                     NotificationCenter.default.post(name: .hotkeyTapDisabled, object: nil)
                 }
+                watchdogAlreadyWarned = true
             }
-        } else if timeSinceLastEvent > 30 {
+        } else if timeSinceLastEvent > 30 && !watchdogAlreadyWarned {
             Log.hotkey.warning("Watchdog: \(Int(timeSinceLastEvent)) 秒无事件")
             CGEvent.tapEnable(tap: tap, enable: true)
             DispatchQueue.main.async {
                 NotificationCenter.default.post(name: .hotkeyTapDisabled, object: nil)
             }
+            watchdogAlreadyWarned = true
         }
     }
 }
