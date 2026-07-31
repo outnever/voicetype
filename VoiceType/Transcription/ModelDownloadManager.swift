@@ -77,10 +77,10 @@ final class ModelDownloadManager: ObservableObject {
                 // 通过 modelEndpoint 指定 HuggingFace 镜像（国内可直连，无需翻墙）
                 let config = WhisperKitConfig(
                     model: modelName,
+                    modelEndpoint: ModelDownloadManager.hfMirrorURL,
                     verbose: false,
                     logLevel: .error,
-                    download: true,
-                    modelEndpoint: ModelDownloadManager.hfMirrorURL
+                    download: true
                 )
                 let pipe = try await WhisperKit(config)
                 Log.transcription.info("WhisperKit: model initialized successfully — \(modelName)")
