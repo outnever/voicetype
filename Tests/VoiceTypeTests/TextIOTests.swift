@@ -1,11 +1,14 @@
-import XCTest
+import Testing
+import Foundation
 @testable import VoiceType
 
 // MARK: - TextInsertionError Tests
 
-final class TextInsertionErrorTests: XCTestCase {
+@Suite("TextInsertionError")
+struct TextInsertionErrorTests {
 
-    func testAllErrorCasesHaveChineseDescriptions() {
+    @Test("All error cases have non-empty Chinese localized descriptions")
+    func allErrorCasesHaveChineseDescriptions() {
         let cases: [TextInsertionError] = [
             .noFocusedApp,
             .noFocusedElement,
@@ -17,31 +20,30 @@ final class TextInsertionErrorTests: XCTestCase {
 
         for errorCase in cases {
             let description = errorCase.localizedDescription
-            XCTAssertFalse(
-                description.isEmpty,
-                "\(errorCase) should have a non-empty localizedDescription"
-            )
+            #expect(!description.isEmpty, "\(errorCase) should have a non-empty localizedDescription")
+
             // All error descriptions must contain Chinese characters (user-facing in Chinese)
-            let containsChinese = description.range(of: "\\p{Han}", options: .regularExpression) != nil
-            XCTAssertTrue(
-                containsChinese || description.contains("无法") || description.contains("失败"),
-                "Error description should contain Chinese text: \(description)"
-            )
+            let containsCJK = description.unicodeScalars.contains { scalar in
+                (0x4E00...0x9FFF).contains(scalar.value) ||  // CJK Unified Ideographs
+                (0x3400...0x4DBF).contains(scalar.value) ||  // CJK Extension A
+                (0xF900...0xFAFF).contains(scalar.value)     // CJK Compatibility
+            }
+            #expect(containsCJK, "Error description should contain Chinese text: \(description)")
         }
     }
 
-    func testAxWriteFailedIncludesErrorCode() {
+    @Test("axWriteFailed preserves error code for diagnostics")
+    func axWriteFailedIncludesErrorCode() {
         let error = TextInsertionError.axWriteFailed(code: 42)
-        // The code value or AX error reference should be accessible
         if case .axWriteFailed(let code) = error {
-            XCTAssertEqual(code, 42)
+            #expect(code == 42)
         } else {
-            XCTFail("Expected .axWriteFailed but got \(error)")
+            Issue.record("Expected .axWriteFailed but got \(error)")
         }
     }
 
-    func testErrorConformsToLocalizedError() {
-        // All cases should provide failureReason and errorDescription
+    @Test("All error cases provide failureReason — user guidance")
+    func errorConformsToLocalizedError() {
         let cases: [TextInsertionError] = [
             .noFocusedApp,
             .noFocusedElement,
@@ -50,77 +52,60 @@ final class TextInsertionErrorTests: XCTestCase {
             .allStrategiesFailed,
         ]
         for errorCase in cases {
-            XCTAssertNotNil(errorCase.errorDescription)
-            XCTAssertNotNil(errorCase.failureReason)
+            #expect(errorCase.errorDescription != nil, "\(errorCase) missing errorDescription")
+            #expect(errorCase.failureReason != nil, "\(errorCase) missing failureReason")
         }
     }
 }
 
 // MARK: - AccessibilityBridge Tests
 
-final class AccessibilityBridgeTests: XCTestCase {
+@Suite("AccessibilityBridge")
+struct AccessibilityBridgeTests {
 
-    func testConformsToTextIOProtocol() {
+    @Test("Conforms to TextIOProtocol")
+    func conformsToTextIOProtocol() {
         let bridge = AccessibilityBridge()
-        XCTAssertTrue(bridge is TextIOProtocol, "AccessibilityBridge must conform to TextIOProtocol")
+        #expect(bridge is TextIOProtocol, "AccessibilityBridge must conform to TextIOProtocol")
     }
 
-    func testCanBeInstantiatedWithoutParameters() {
+    @Test("Can be instantiated without parameters")
+    func canBeInstantiatedWithoutParameters() {
         let bridge = AccessibilityBridge()
-        XCTAssertNotNil(bridge)
+        #expect(bridge as AnyObject != nil)
     }
 
-    func testInsertTextThrowsWhenNoAppFocused() async {
+    @Test("insertText throws when no app has AX focus (headless test env)")
+    func insertTextThrowsWhenNoAppFocused() async {
         let bridge = AccessibilityBridge()
         // In a headless test environment, no app has AX focus.
         // insertText should throw .noFocusedApp or .noFocusedElement.
         do {
             _ = try await bridge.insertText("test")
-            XCTFail("Expected insertText to throw when no app is focused in test environment")
+            Issue.record("Expected insertText to throw when no app is focused in test environment")
         } catch {
-            // Expected failure — no focused application during test
-            XCTAssertTrue(
-                error is TextInsertionError,
-                "Error should be a TextInsertionError, got \(type(of: error))"
-            )
+            #expect(error is TextInsertionError,
+                    "Error should be a TextInsertionError, got \(type(of: error))")
         }
     }
 
-    func testIsPasswordFieldReturnsFalseWhenNoFocusedApp() {
+    @Test("isPasswordField returns false when no app is focused")
+    func isPasswordFieldReturnsFalseWhenNoFocusedApp() {
         let bridge = AccessibilityBridge()
         let result = bridge.isPasswordField()
         // When no app is focused, isPasswordField should safely return false
-        XCTAssertFalse(result, "isPasswordField should return false when no app is focused")
-    }
-
-    func testInsertTextFieldIsAsyncThrows() {
-        // Verify the method signature includes async throws
-        let bridge = AccessibilityBridge()
-        // Structural test: method exists with correct signature
-        let _: (String) async throws -> Void = bridge.insertText
+        #expect(!result, "isPasswordField should return false when no app is focused")
     }
 }
 
-// MARK: - TextIOProtocol Tests
+// MARK: - TextIOProtocol Structural Tests
 
-final class TextIOProtocolTests: XCTestCase {
+@Suite("TextIOProtocol")
+struct TextIOProtocolTests {
 
-    func testAccessibilityBridgeIsTextIOProtocol() {
-        // Compile-time verification that AccessibilityBridge conforms to TextIOProtocol
+    @Test("AccessibilityBridge is assignable to TextIOProtocol type")
+    func accessibilityBridgeIsTextIOProtocol() {
         let bridge: TextIOProtocol = AccessibilityBridge()
-        XCTAssertNotNil(bridge)
-    }
-
-    func testProtocolRequiresInsertText() {
-        // Verify the protocol defines insertText as async throws
-        let bridge: TextIOProtocol = AccessibilityBridge()
-        // If this compiles, the protocol has the correct method signature
-        let _: (String) async throws -> Void = bridge.insertText
-    }
-
-    func testProtocolRequiresIsPasswordField() {
-        // Verify the protocol defines isPasswordField() -> Bool
-        let bridge: TextIOProtocol = AccessibilityBridge()
-        let _: () -> Bool = bridge.isPasswordField
+        #expect(bridge as AnyObject != nil)
     }
 }
