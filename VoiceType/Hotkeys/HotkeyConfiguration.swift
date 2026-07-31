@@ -1,15 +1,11 @@
 import Foundation
 import CoreGraphics
 
-/// Hotkey trigger mode
 enum HotkeyMode {
-    /// Hold down to activate, release to deactivate (dictation)
     case holdToTalk
-    /// Single press triggers an action (correction)
     case pressToTrigger
 }
 
-/// Definition of a global hotkey
 struct HotkeyDefinition {
     let keyCode: Int64
     let modifiers: CGEventFlags
@@ -17,27 +13,25 @@ struct HotkeyDefinition {
     let description: String
 }
 
-/// Default hotkey definitions for VoiceType
 enum HotkeyDefaults {
-    /// Dictation hotkey: Fn key (hold-to-talk)
-    /// Fn key sends flagsChanged events, not keyDown/keyUp — handled specially in HotkeyManager.
+    /// 听写热键: ⌥+空格 (hold-to-talk)
+    /// Option+Space 是语音输入工具的行业标准 (Wispr Flow, Superwhisper 均用此键)
     static let dictation = HotkeyDefinition(
-        keyCode: 63,  // kVK_Function (Fn key)
-        modifiers: [], // Fn key state is tracked via .maskSecondaryFn in flagsChanged
+        keyCode: 49,  // kVK_Space
+        modifiers: .maskAlternate,  // Option (⌥)
         mode: .holdToTalk,
-        description: "Fn (hold to talk)"
+        description: "⌥ 空格 (按住说话)"
     )
 
-    /// Correction hotkey: Ctrl+Shift+C (press-to-trigger)
+    /// 纠错热键: Ctrl+Shift+C (press-to-trigger)
     static let correction = HotkeyDefinition(
         keyCode: 8,   // kVK_ANSI_C
         modifiers: [.maskControl, .maskShift],
         mode: .pressToTrigger,
-        description: "Ctrl+Shift+C (press to correct)"
+        description: "⌃⇧C (按下纠错)"
     )
 }
 
-/// Errors that can occur during hotkey registration and operation
 enum HotkeyError: Error, LocalizedError {
     case tapCreationFailed
     case tapNotEnabled
@@ -47,13 +41,13 @@ enum HotkeyError: Error, LocalizedError {
     var errorDescription: String? {
         switch self {
         case .tapCreationFailed:
-            return "Failed to create CGEvent tap. Ensure VoiceType has Accessibility permission."
+            return "创建 CGEvent tap 失败，请确认 VoiceType 已获得辅助功能权限"
         case .tapNotEnabled:
-            return "CGEvent tap is not enabled. The system may have revoked permissions."
+            return "CGEvent tap 未启用，系统可能已撤销权限"
         case .tapRestoreFailed:
-            return "Failed to restore CGEvent tap after it was disabled."
+            return "CGEvent tap 恢复失败"
         case .alreadyRegistered:
-            return "Hotkey manager is already registered."
+            return "热键管理器已注册"
         }
     }
 }

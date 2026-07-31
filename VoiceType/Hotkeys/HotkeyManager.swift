@@ -2,110 +2,67 @@
 import CoreGraphics
 import Logging
 
-/// Manages system-wide global hotkey detection via CGEvent tap.
+/// 系统级全局热键管理器，通过 CGEvent tap 监听按键。
 ///
-/// Registers a CGEvent tap on a dedicated RunLoop thread to monitor key events
-/// system-wide without consuming them. Supports two hotkey modes:
-/// - holdToTalk: Fn key held down (push-to-talk dictation)
-/// - pressToTrigger: Ctrl+Shift+C pressed once (AI correction)
+/// 两种热键模式:
+/// - holdToTalk: ⌥+空格 按住说话、松手结束（听写）
+/// - pressToTrigger: Ctrl+Shift+C 按下即触发（纠错）
 ///
-/// All state-change notifications are dispatched to the main thread via the
-/// coordinator callback hooks or NotificationCenter.
-///
-/// ## Threat Mitigations (from PLAN.md threat model)
-/// - T-01-06 (DoS): Watchdog checks tap health every 5s, auto-restores, notifies on failure
-/// - T-01-07 (EoP): Events are observed only — returned unmodified via `Unmanaged.passUnretained`
-/// - T-01-08 (Info Disclosure): Only specific key codes are checked (63, 8); no key logging
-/// - T-01-09 (Tampering): Lifecycle managed by AppCoordinator — not released while tap is active
+/// 所有状态通知通过 coordinator 回调或 NotificationCenter 派发到主线程。
 final class HotkeyManager: @unchecked Sendable {
 
-    // MARK: - Properties
-
-    /// The CGEvent tap reference
     private var eventTap: CFMachPort?
-
-    /// RunLoop source for the event tap
     private var runLoopSource: CFRunLoopSource?
-
-    /// Dedicated thread running the event tap RunLoop
     private var tapThread: Thread?
 
-    /// Coordinator reference for callback hooks (weak to avoid retain cycle)
     weak var coordinator: AppCoordinator?
 
-    // MARK: - Key Code Constants
+    // MARK: - 按键常量
 
-    private let dictationKeyCode: Int64 = 63   // kVK_Function
+    private let dictationKeyCode: Int64 = 49   // kVK_Space
+    private let dictationModifiers: CGEventFlags = .maskAlternate  // Option (⌥)
     private let correctionKeyCode: Int64 = 8   // kVK_ANSI_C
+    private let correctionModifiers: CGEventFlags = [.maskControl, .maskShift]
 
-    // MARK: - State Tracking
+    // MARK: - 状态跟踪
 
-    /// Tracks whether Fn key is currently held down (flagsChanged-based, not keyDown/keyUp)
-    private var isFnKeyDown: Bool = false
+    /// 听写热键当前是否被按住
+    private var isDictationKeyDown: Bool = false
 
-    /// Prevents correction hotkey from firing multiple times in one key cycle.
-    /// Set to true on first fire, reset when C key is released.
+    /// 防止纠错热键在同一次按键周期中重复触发
     private var correctionFiredInCurrentCycle: Bool = false
 
-    /// Timestamp of last received event (for watchdog heartbeat monitoring)
     private var lastEventTimestamp: Date = Date()
-
-    /// Watchdog timer for tap health monitoring
     private var watchdogTimer: DispatchSourceTimer?
 
-    /// Serial queue for thread-safe state access
-    private let stateQueue = DispatchQueue(label: "com.voicetype.hotkey.state")
-
-    /// Whether the hotkey manager is currently registered
     private(set) var isRegistered: Bool = false
 
-    // MARK: - Callback Hooks
+    // MARK: - 回调
 
-    /// Invoked when dictation hotkey (Fn) is pressed down.
-    /// Dispatched to main thread via DispatchQueue.main.async.
     var onDictationKeyDown: (() -> Void)?
-
-    /// Invoked when dictation hotkey (Fn) is released.
-    /// Dispatched to main thread via DispatchQueue.main.async.
     var onDictationKeyUp: (() -> Void)?
-
-    /// Invoked when correction hotkey (Ctrl+Shift+C) is pressed.
-    /// Dispatched to main thread via DispatchQueue.main.async.
     var onCorrectionKeyPress: (() -> Void)?
 
-    // MARK: - Initialization
+    // MARK: -
 
     init() {
-        Log.hotkey.info("HotkeyManager initialized")
+        Log.hotkey.info("HotkeyManager 已初始化")
     }
 
     deinit {
         unregister()
-        Log.hotkey.info("HotkeyManager deinitialized")
     }
 
-    // MARK: - Registration
+    // MARK: - 注册
 
-    /// Register the CGEvent tap and start monitoring global hotkeys.
-    ///
-    /// Creates a CGEvent tap with `.cgSessionEventTap` at `.headInsertEventTap` position
-    /// on a dedicated RunLoop thread. The tap monitors keyDown, keyUp, and flagsChanged events
-    /// system-wide without consuming them.
-    ///
-    /// Must be called after the application has been granted Accessibility permission
-    /// (AXIsProcessTrusted() == true). If the tap cannot be enabled, this method throws
-    /// HotkeyError.tapCreationFailed or HotkeyError.tapNotEnabled.
-    ///
-    /// - Throws: HotkeyError if tap creation or enable fails
     func register() throws {
         guard !isRegistered else {
-            Log.hotkey.warning("HotkeyManager already registered — skipping duplicate call")
+            Log.hotkey.warning("HotkeyManager 已注册，跳过重复调用")
             throw HotkeyError.alreadyRegistered
         }
 
-        Log.hotkey.info("Registering CGEvent tap for global hotkeys (Fn & Ctrl+Shift+C)")
+        Log.hotkey.info("注册 CGEvent tap（听写: ⌥+空格, 纠错: ⌃⇧C）")
 
-        // Event mask: keyDown + keyUp + flagsChanged + tap disabled notifications
         let eventMask: CGEventMask = (
             (1 << CGEventType.keyDown.rawValue) |
             (1 << CGEventType.keyUp.rawValue) |
@@ -114,8 +71,6 @@ final class HotkeyManager: @unchecked Sendable {
             (1 << CGEventType.tapDisabledByUserInput.rawValue)
         )
 
-        // Create the event tap — uses .cgSessionEventTap for system-wide coverage
-        // and .headInsertEventTap so we observe events before they reach the target app
         guard let tap = CGEvent.tapCreate(
             tap: .cgSessionEventTap,
             place: .headInsertEventTap,
@@ -124,31 +79,24 @@ final class HotkeyManager: @unchecked Sendable {
             callback: HotkeyManager.eventTapCallback,
             userInfo: Unmanaged.passUnretained(self).toOpaque()
         ) else {
-            Log.hotkey.error("CGEvent.tapCreate returned nil — Accessibility permission may be missing")
+            Log.hotkey.error("CGEvent.tapCreate 失败 — 可能缺少辅助功能权限")
             throw HotkeyError.tapCreationFailed
         }
 
         self.eventTap = tap
 
-        // Create RunLoop source from the tap
         guard let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0) else {
-            Log.hotkey.error("Failed to create RunLoop source for event tap")
+            Log.hotkey.error("创建 RunLoop source 失败")
             throw HotkeyError.tapCreationFailed
         }
 
         self.runLoopSource = source
 
-        // Start dedicated thread for the event tap RunLoop.
-        // Using a dedicated thread (not .main) prevents the event callback from
-        // blocking UI work, and ensures the tap's CFRunLoop is isolated.
         let thread = Thread {
             let runLoop = CFRunLoopGetCurrent()
             CFRunLoopAddSource(runLoop, source, .commonModes)
-
-            // Enable the tap now that the RunLoop is ready to receive events
             CGEvent.tapEnable(tap: tap, enable: true)
-
-            Log.hotkey.info("Hotkey tap thread started — entering RunLoop on thread 'com.voicetype.hotkey-tap'")
+            Log.hotkey.info("热键 tap 线程已启动")
             CFRunLoopRun()
         }
         thread.name = "com.voicetype.hotkey-tap"
@@ -156,36 +104,28 @@ final class HotkeyManager: @unchecked Sendable {
         thread.start()
         self.tapThread = thread
 
-        // Brief wait for the thread to add the source and enable the tap
         Thread.sleep(forTimeInterval: 0.1)
 
-        // Verify the tap is actually enabled before returning
         guard CGEvent.tapIsEnabled(tap: tap) else {
-            Log.hotkey.error("CGEvent tap created but not enabled — verify Accessibility permission in System Settings")
+            Log.hotkey.error("CGEvent tap 已创建但未启用 — 请检查辅助功能权限")
             throw HotkeyError.tapNotEnabled
         }
 
         isRegistered = true
         lastEventTimestamp = Date()
-        Log.hotkey.info("HotkeyManager registered successfully — tap enabled, thread running")
+        Log.hotkey.info("HotkeyManager 注册成功")
     }
 
-    /// Unregister the CGEvent tap and stop the RunLoop thread.
-    /// Safe to call multiple times — no-ops if already unregistered.
     func unregister() {
         guard isRegistered else { return }
 
-        Log.hotkey.info("Unregistering CGEvent tap and stopping RunLoop thread")
-
-        // Stop watchdog first
+        Log.hotkey.info("取消注册 CGEvent tap")
         stopWatchdog()
 
-        // Disable the tap before tearing down the RunLoop
         if let tap = eventTap {
             CGEvent.tapEnable(tap: tap, enable: false)
         }
 
-        // Stop the RunLoop thread
         if let source = runLoopSource, let thread = tapThread, thread.isExecuting {
             CFRunLoopRemoveSource(CFRunLoopGetCurrent(), source, .commonModes)
             CFRunLoopStop(CFRunLoopGetCurrent())
@@ -195,31 +135,25 @@ final class HotkeyManager: @unchecked Sendable {
         runLoopSource = nil
         tapThread = nil
         isRegistered = false
-        isFnKeyDown = false
+        isDictationKeyDown = false
         correctionFiredInCurrentCycle = false
 
-        Log.hotkey.info("HotkeyManager unregistered")
+        Log.hotkey.info("HotkeyManager 已取消注册")
     }
 
-    // MARK: - C Callback (bridges CGEvent tap to Swift)
+    // MARK: - C 回调桥接
 
-    /// Static C callback for CGEvent tap. Bridges the C function pointer to the Swift instance method.
     private static let eventTapCallback: CGEventTapCallBack = { (proxy, type, event, userInfo) in
         guard let userInfo = userInfo else {
-            // No manager reference — pass event through unchanged
             return Unmanaged.passUnretained(event)
         }
-
         let manager = Unmanaged<HotkeyManager>.fromOpaque(userInfo).takeUnretainedValue()
         return manager.handleCGEvent(proxy: proxy, type: type, event: event)
     }
 
-    // MARK: - Event Dispatch
+    // MARK: - 事件分发
 
-    /// Routes CGEvent tap callbacks to the appropriate handler based on event type.
-    /// All events are returned unmodified (observed, not consumed).
     private func handleCGEvent(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
-        // Update heartbeat timestamp for any event — proves the tap is alive
         lastEventTimestamp = Date()
 
         switch type {
@@ -233,14 +167,14 @@ final class HotkeyManager: @unchecked Sendable {
             handleFlagsChanged(event: event)
 
         case .tapDisabledByTimeout, .tapDisabledByUserInput:
-            let reason = type == .tapDisabledByTimeout ? "timeout" : "user input"
-            Log.hotkey.warning("Event tap disabled by \(reason) — attempting restore")
+            let reason = type == .tapDisabledByTimeout ? "超时" : "用户输入"
+            Log.hotkey.warning("Event tap 被 \(reason) 禁用 — 尝试恢复")
             if let tap = eventTap {
                 CGEvent.tapEnable(tap: tap, enable: true)
                 if CGEvent.tapIsEnabled(tap: tap) {
-                    Log.hotkey.info("Event tap restored successfully after \(reason)")
+                    Log.hotkey.info("Event tap 已恢复 (\(reason))")
                 } else {
-                    Log.hotkey.error("Event tap restore failed after \(reason)")
+                    Log.hotkey.error("Event tap 恢复失败 (\(reason))")
                     DispatchQueue.main.async {
                         NotificationCenter.default.post(name: .hotkeyTapDisabled, object: nil)
                     }
@@ -251,69 +185,66 @@ final class HotkeyManager: @unchecked Sendable {
             break
         }
 
-        // CRITICAL: Return the event unmodified — we observe but NEVER consume.
-        // Consuming events would block keyboard input for all applications.
         return Unmanaged.passUnretained(event)
     }
 
-    // MARK: - Key Event Handler
+    // MARK: - 按键事件
 
-    /// Handle keyDown and keyUp events.
-    /// - Correction hotkey (Ctrl+Shift+C): fires on keyDown, resets on keyUp of C
     private func handleKeyEvent(event: CGEvent, isKeyDown: Bool) {
         let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
         let flags = event.flags
 
-        if isKeyDown {
-            // Check correction hotkey: Ctrl+Shift+C (press-to-trigger, D-04)
-            if keyCode == correctionKeyCode,
+        // 听写: ⌥+空格 (hold-to-talk)
+        if keyCode == dictationKeyCode {
+            let optionHeld = flags.contains(.maskAlternate)
+            if optionHeld {
+                if isKeyDown && !isDictationKeyDown {
+                    isDictationKeyDown = true
+                    Log.hotkey.info("听写热键按下: ⌥+空格")
+                    DispatchQueue.main.async { [weak self] in
+                        self?.coordinator?.onDictationKeyDown?()
+                        self?.onDictationKeyDown?()
+                    }
+                } else if !isKeyDown && isDictationKeyDown {
+                    isDictationKeyDown = false
+                    Log.hotkey.info("听写热键释放: ⌥+空格")
+                    DispatchQueue.main.async { [weak self] in
+                        self?.coordinator?.onDictationKeyUp?()
+                        self?.onDictationKeyUp?()
+                    }
+                }
+            }
+        }
+
+        // 纠错: Ctrl+Shift+C (press-to-trigger)
+        if keyCode == correctionKeyCode {
+            if isKeyDown,
                flags.contains(.maskControl),
                flags.contains(.maskShift),
                !correctionFiredInCurrentCycle {
                 correctionFiredInCurrentCycle = true
-                Log.hotkey.info("Correction hotkey detected: Ctrl+Shift+C")
+                Log.hotkey.info("纠错热键触发: ⌃⇧C")
                 DispatchQueue.main.async { [weak self] in
                     self?.coordinator?.onCorrectionKeyPress?()
                     self?.onCorrectionKeyPress?()
                 }
             }
-        } else {
-            // Reset correction cycle when C key is released.
-            // This allows multiple C presses while Ctrl+Shift are held.
-            if keyCode == correctionKeyCode {
+            if !isKeyDown {
                 correctionFiredInCurrentCycle = false
             }
         }
     }
 
-    // MARK: - Flags Changed Handler (Fn Key)
-
-    /// Handle flagsChanged events for the Fn key (push-to-talk dictation, D-03).
-    ///
-    /// The Fn key on Apple keyboards does NOT generate standard keyDown/keyUp events.
-    /// Instead, it toggles the `.maskSecondaryFn` flag via flagsChanged events.
-    /// This handler detects transitions of the Fn flag to determine press vs. release.
+    /// 处理修饰键变化（Fn 键等发送 flagsChanged 而非 keyDown/keyUp）。
+    /// 目前仅用于 Option 键的状态跟踪——如果用户在松开空格前先松开了 Option，
+    /// 下一次 keyUp 会检测到 Option 已不在 flags 中，视为 dictation 结束。
     private func handleFlagsChanged(event: CGEvent) {
         let flags = event.flags
-        let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
 
-        // Only process Fn key events.
-        // keyCode 63 (kVK_Function) may or may not be reliably set in flagsChanged —
-        // we also check the flag transition as a fallback.
-        let fnIsNowDown = flags.contains(.maskSecondaryFn)
-
-        if fnIsNowDown && !isFnKeyDown {
-            // Fn key pressed down — start dictation
-            isFnKeyDown = true
-            Log.hotkey.info("Dictation hotkey pressed: Fn (hold-to-talk started, keyCode=\(keyCode))")
-            DispatchQueue.main.async { [weak self] in
-                self?.coordinator?.onDictationKeyDown?()
-                self?.onDictationKeyDown?()
-            }
-        } else if !fnIsNowDown && isFnKeyDown {
-            // Fn key released — stop dictation
-            isFnKeyDown = false
-            Log.hotkey.info("Dictation hotkey released: Fn (hold-to-talk ended, keyCode=\(keyCode))")
+        // 如果 Option 键在听写期间被释放而空格还按着，也结束听写
+        if isDictationKeyDown && !flags.contains(.maskAlternate) {
+            isDictationKeyDown = false
+            Log.hotkey.info("听写结束: Option 键提前释放")
             DispatchQueue.main.async { [weak self] in
                 self?.coordinator?.onDictationKeyUp?()
                 self?.onDictationKeyUp?()
@@ -323,23 +254,13 @@ final class HotkeyManager: @unchecked Sendable {
 
     // MARK: - Watchdog
 
-    /// Start periodic monitoring of CGEvent tap health (D-06, HOTK-04).
-    ///
-    /// Two layers of protection:
-    /// 1. Primary: Checks `CGEvent.tapIsEnabled()` every `interval` seconds.
-    ///    If disabled, attempts `CGEvent.tapEnable` to restore. If restore fails,
-    ///    posts `.hotkeyTapDisabled` notification for AppCoordinator to handle.
-    /// 2. Secondary: If no events received in 30+ seconds despite tap appearing enabled,
-    ///    the tap may be silently failing. Attempts re-enable and notifies.
-    ///
-    /// - Parameter interval: Check interval in seconds (default 5.0)
     func startWatchdog(interval: TimeInterval = 5.0) {
         guard isRegistered else {
-            Log.hotkey.warning("Cannot start watchdog — HotkeyManager not registered")
+            Log.hotkey.warning("无法启动 watchdog — HotkeyManager 未注册")
             return
         }
 
-        Log.hotkey.info("Starting watchdog timer (interval: \(interval)s, heartbeat threshold: 30s)")
+        Log.hotkey.info("启动 watchdog（间隔 \(interval) 秒）")
 
         let timer = DispatchSource.makeTimerSource(queue: .global(qos: .utility))
         timer.schedule(deadline: .now() + interval, repeating: interval)
@@ -350,49 +271,33 @@ final class HotkeyManager: @unchecked Sendable {
         self.watchdogTimer = timer
     }
 
-    /// Stop the watchdog timer.
     func stopWatchdog() {
         watchdogTimer?.cancel()
         watchdogTimer = nil
-        Log.hotkey.info("Watchdog stopped")
     }
 
-    /// Single watchdog check cycle. Called on a utility queue every N seconds.
     private func performWatchdogCheck() {
-        guard let tap = eventTap else {
-            Log.hotkey.warning("Watchdog: eventTap is nil — tap may have been released unexpectedly")
-            return
-        }
+        guard let tap = eventTap else { return }
 
         let tapEnabled = CGEvent.tapIsEnabled(tap: tap)
         let timeSinceLastEvent = Date().timeIntervalSince(lastEventTimestamp)
 
         if !tapEnabled {
-            // Primary check: tap is disabled (OS update, permission revocation, timeout)
-            Log.hotkey.warning("Watchdog: Event tap is disabled — attempting automic restore")
-
+            Log.hotkey.warning("Watchdog: tap 已禁用 — 尝试自动恢复")
             CGEvent.tapEnable(tap: tap, enable: true)
-
-            // Brief delay before re-check to allow the system to process the enable
             Thread.sleep(forTimeInterval: 0.1)
-
             if CGEvent.tapIsEnabled(tap: tap) {
-                Log.hotkey.info("Watchdog: Event tap restored successfully")
-                // Reset heartbeat after restore
+                Log.hotkey.info("Watchdog: tap 已恢复")
                 lastEventTimestamp = Date()
             } else {
-                Log.hotkey.error("Watchdog: Event tap restore failed — notifying AppCoordinator via NotificationCenter")
+                Log.hotkey.error("Watchdog: tap 恢复失败")
                 DispatchQueue.main.async {
                     NotificationCenter.default.post(name: .hotkeyTapDisabled, object: nil)
                 }
             }
         } else if timeSinceLastEvent > 30 {
-            // Secondary check: tap reports enabled but no events for 30+ seconds.
-            // This can happen when the tap is silently broken (PITFALLS.md Pitfall 1).
-            Log.hotkey.warning("Watchdog: No events received for \(Int(timeSinceLastEvent))s — tap may be silently failing, attempting re-enable")
-
+            Log.hotkey.warning("Watchdog: \(Int(timeSinceLastEvent)) 秒无事件 — tap 可能静默失效")
             CGEvent.tapEnable(tap: tap, enable: true)
-
             DispatchQueue.main.async {
                 NotificationCenter.default.post(name: .hotkeyTapDisabled, object: nil)
             }
@@ -400,18 +305,8 @@ final class HotkeyManager: @unchecked Sendable {
     }
 }
 
-// MARK: - Notification Names
+// MARK: - Notification 名称
 
 extension Notification.Name {
-    /// Posted on the main thread when the CGEvent tap becomes disabled.
-    ///
-    /// Subscribers (AppCoordinator) should:
-    /// - Update `statusMessage` to warn the user
-    /// - Change menu bar icon to orange/red
-    /// - Optionally open System Settings → Privacy → Accessibility
-    ///
-    /// This notification fires when:
-    /// - Watchdog detects tap is disabled and auto-restore fails
-    /// - Watchdog detects 30+ seconds of event silence despite tap appearing enabled
     static let hotkeyTapDisabled = Notification.Name("com.voicetype.hotkey.tapDisabled")
 }
