@@ -216,7 +216,11 @@ struct CompositeTextIOTests {
             try await composite.insertText("doomed")
             Issue.record("Expected allStrategiesFailed but no error was thrown")
         } catch let error as TextInsertionError {
-            #expect(error == .allStrategiesFailed)
+            if case .allStrategiesFailed = error {
+                // expected
+            } else {
+                Issue.record("Expected .allStrategiesFailed, got \(error)")
+            }
         } catch {
             Issue.record("Expected TextInsertionError.allStrategiesFailed, got \(error)")
         }
@@ -234,7 +238,11 @@ struct CompositeTextIOTests {
             try await composite.insertText("secret")
             Issue.record("Expected passwordFieldBlocked but no error was thrown")
         } catch let error as TextInsertionError {
-            #expect(error == .passwordFieldBlocked)
+            if case .passwordFieldBlocked = error {
+                // expected
+            } else {
+                Issue.record("Expected .passwordFieldBlocked, got \(error)")
+            }
         } catch {
             Issue.record("Expected TextInsertionError.passwordFieldBlocked, got \(error)")
         }

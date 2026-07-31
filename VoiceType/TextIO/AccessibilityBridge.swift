@@ -150,3 +150,91 @@ final class AccessibilityBridge: TextIOProtocol {
         return value
     }
 }
+
+// MARK: - CompositeTextIO
+
+/// Composite text insertion strategy implementing the fallback chain.
+///
+/// `CompositeTextIO` composes `AccessibilityBridge` (primary, D-08) and
+/// `ClipboardBridge` (fallback, D-09) into a single `TextIOProtocol` implementation.
+/// It is the strategy used by `AppCoordinator` for all text insertion operations.
+///
+/// ## Fallback Chain
+///
+/// 1. **Password guard** (D-10): Check `primary.isPasswordField()`. If the focused
+///    element is a password field, throw `.passwordFieldBlocked` — neither bridge
+///    is invoked. This prevents dictation text from appearing in secure fields.
+/// 2. **Primary (AXUIElement)**: Try `primary.insertText(text)`. If successful, return.
+///    If it throws, log the failure and proceed to fallback.
+/// 3. **Fallback (Clipboard)**: Try `fallback.insertText(text)`. If successful, return.
+///    If it throws, throw `.allStrategiesFailed`.
+///
+/// ## Usage
+///
+/// ```swift
+/// let textIO = CompositeTextIO(
+///     primary: AccessibilityBridge(),
+///     fallback: ClipboardBridge()
+/// )
+/// try await textIO.insertText(transcribedText)
+/// ```
+final class CompositeTextIO: TextIOProtocol {
+    /// Primary strategy — AXUIElement direct text insertion (D-08).
+    let primary: TextIOProtocol
+
+    /// Fallback strategy — NSPasteboard save→write→Cmd+V→restore (D-09).
+    let fallback: TextIOProtocol
+
+    /// Initialize the composite with explicit primary and fallback bridges.
+    ///
+    /// - Parameters:
+    ///   - primary: The preferred text insertion bridge (typically `AccessibilityBridge`).
+    ///   - fallback: The backup bridge invoked when primary fails (typically `ClipboardBridge`).
+    init(primary: TextIOProtocol, fallback: TextIOProtocol) {
+        self.primary = primary
+        self.fallback = fallback
+    }
+
+    // MARK: - TextIOProtocol
+
+    /// Insert text using the primary strategy, falling back to clipboard on failure.
+    ///
+    /// - Parameter text: The text to insert at the cursor.
+    /// - Throws:
+    ///   - `TextInsertionError.passwordFieldBlocked` if the focused element is a password field.
+    ///   - `TextInsertionError.allStrategiesFailed` if both strategies fail.
+    func insertText(_ text: String) async throws {
+        // D-10: Check password field before any insertion attempt.
+        // This guard prevents dictation text from writing to secure/password fields.
+        guard !primary.isPasswordField() else {
+            Log.textIO.warning("CompositeTextIO: password field detected — refusing to insert text")
+            throw TextInsertionError.passwordFieldBlocked
+        }
+
+        // D-08: Primary strategy — AXUIElement direct write
+        do {
+            try await primary.insertText(text)
+            Log.textIO.info("CompositeTextIO: text inserted via primary (AXUIElement) — \(text.count) chars")
+            return
+        } catch {
+            Log.textIO.warning("CompositeTextIO: AXUIElement insert failed (\(error)). Falling back to clipboard.")
+        }
+
+        // D-09, D-19: Fallback strategy — Clipboard paste
+        do {
+            try await fallback.insertText(text)
+            Log.textIO.info("CompositeTextIO: text inserted via fallback (Clipboard) — \(text.count) chars")
+        } catch {
+            Log.textIO.error("CompositeTextIO: all text insertion strategies failed — \(error)")
+            throw TextInsertionError.allStrategiesFailed
+        }
+    }
+
+    /// Delegate password field detection to the primary bridge.
+    ///
+    /// Only `AccessibilityBridge` can detect password fields via AX attributes.
+    /// `ClipboardBridge` always returns `false` — it has no read access to the target app.
+    func isPasswordField() -> Bool {
+        primary.isPasswordField()
+    }
+}
