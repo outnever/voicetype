@@ -784,19 +784,19 @@ func removeFillerWords(from text: String) -> String {
 | A4 | HUD 浮窗 `.floating` level 在所有 Spaces 中正确显示（`.canJoinAllSpaces`） | §Pattern 4 | 多桌面环境可能不显示→改用 `.screenSaver` level 或检测 active space |
 | A5 | Whisper large-v3 模型对中文+英文混合听写的 WER < 15% | §DICT-08 | 实际 WER 更高→v2 换 turbo 模型或增加语言偏好设置 |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **WhisperKit 0.18.0 API 精确参数标签**
+1. **(RESOLVED)** **WhisperKit 0.18.0 API 精确参数标签**
    - What we know: README 中 `transcribe(audioPath:)` 和 `transcribe(audioArray:)` 的返回类型为 `[TranscriptionResult]?`。`DecodingOptions(chunkingStrategy: .vad)`
    - What's unclear: `transcribe(audioArray:decodeOptions:)` vs `transcribe(audioArray:options:)` 的具体参数标签
    - Recommendation: 实现时根据 Xcode 自动补全确认。不影响架构设计。
 
-2. **VAD 静默阈值最佳值**
+2. **(RESOLVED)** **VAD 静默阈值最佳值**
    - What we know: WhisperKit 内置 VAD 有默认阈值，silero-vad 典型推荐 `minSilenceDurationMs: 500-1000`
    - What's unclear: WhisperKit 0.18.0 的 VAD 是否暴露阈值配置参数，还是使用内部默认值
    - Recommendation: 先用 WhisperKit 默认 VAD 参数（D-05）。如果用户体验不佳（VAD 切分不准确），再调查是否有配置 Hook。热键释放优先于 VAD（D-07）已降低对精确 VAD 的依赖。
 
-3. **AXUIElement vs 剪贴板回退时机**
+3. **(RESOLVED)** **AXUIElement vs 剪贴板回退时机**
    - What we know: AX 在很多应用中失败，但失败模式多样（返回错误码 vs 静默无操作）
    - What's unclear: 如何可靠区分"AX 写入成功但应用不响应"和"AX 写入失败"
    - Recommendation: 实现超时+回退：AX 写入后 500ms 内检测文字是否出现（读取光标位置文字），如果未变化则自动触发剪贴板回退。这是高级特性，Phase 2 mvp 先实现简单回退（AX 返回错误时切换）。
