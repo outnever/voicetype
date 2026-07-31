@@ -40,15 +40,16 @@ final class AppleSpeechService: ObservableObject {
             isAuthorized = true
             return true
         case .notDetermined:
-            return await withCheckedContinuation { continuation in
-                SFSpeechRecognizer.requestAuthorization { [weak self] status in
-                    let granted = (status == .authorized)
-                    Task { @MainActor in
-                        self?.isAuthorized = granted
-                        continuation.resume(returning: granted)
-                    }
+            // 注意：TCC 的 completion handler 在后台队列调用。
+            // 不能在 handler 里创建 Task { @MainActor in }——Swift 6 隔离断言会崩溃。
+            // continuation.resume 是线程安全的，resume 后自动恢复在 MainActor 上下文。
+            let granted = await withCheckedContinuation { continuation in
+                SFSpeechRecognizer.requestAuthorization { status in
+                    continuation.resume(returning: status == .authorized)
                 }
             }
+            isAuthorized = granted
+            return granted
         case .denied, .restricted:
             Log.speech.warning("语音识别权限被拒绝")
             return false
