@@ -59,6 +59,30 @@ final class AppCoordinator: ObservableObject {
     /// Available immediately but functional only after modelDownloadManager.initialize() completes.
     let transcriptionService: TranscriptionService!
 
+    // MARK: - Phase 2 Subsystems (TextIO)
+
+    /// Text insertion strategy — primary AXUIElement with clipboard fallback (D-08, D-09).
+    /// CompositeTextIO implements the fallback chain: AX → Clipboard → error.
+    let textIO: TextIOProtocol = CompositeTextIO(
+        primary: AccessibilityBridge(),
+        fallback: ClipboardBridge()
+    )
+
+    // MARK: - Phase 3 Subsystems (HUD)
+
+    /// HUD window controller — floating overlay for recording/transcribing status.
+    /// Lazy because NSWindow creation has side effects; deferred to first use.
+    lazy var hudController = HUDWindowController(coordinator: self)
+
+    // MARK: - Internal State
+
+    /// Race condition guard: prevents overlapping dictation pipelines (T-02-12).
+    /// Set to true when dictation hotkey fires, false when pipeline completes.
+    private var isDictating = false
+
+    /// Combine cancellables storage for reactive state subscriptions.
+    private var cancellables = Set<AnyCancellable>()
+
     // MARK: - Computed Properties
 
     /// D-08: Aggregate permission status for menu bar icon color derivation
@@ -95,9 +119,34 @@ final class AppCoordinator: ObservableObject {
         Log.app.info("AppCoordinator initializing — menu bar icon set to '\(self.iconName)'")
 
         Log.app.info("TranscriptionService created")
+        Log.app.info("TextIO (CompositeTextIO) initialized — primary: AX, fallback: Clipboard")
 
         // Listen for model state changes so AppCoordinator.modelState stays in sync
         modelDownloadManager.$modelState.assign(to: &$modelState)
+
+        // Subscribe to model state for status message updates (UXFE-02, D-17)
+        modelDownloadManager.$modelState
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] newState in
+                guard let self else { return }
+                switch newState {
+                case .notLoaded:
+                    break
+                case .downloading(let progress):
+                    self.statusMessage = "正在下载语音模型… \(Int(progress * 100))%"
+                case .loading(let msg):
+                    self.statusMessage = msg
+                case .ready:
+                    if self.state == .idle {
+                        self.statusMessage = "就绪"
+                    }
+                    Log.app.info("Model ready — dictation available")
+                case .error(let msg):
+                    self.statusMessage = "模型错误: \(msg)"
+                    Log.app.error("Model load failed: \(msg)")
+                }
+            }
+            .store(in: &cancellables)
 
         // Register for audio device and silence notifications.
         // These must be set up in init so they are ready before the menu bar renders.
@@ -160,30 +209,141 @@ final class AppCoordinator: ObservableObject {
     private func setupHotkeyCallbacks() {
         hotkeyManager.coordinator = self
 
-        // Dictation: Fn key hold-to-talk (D-03)
+        // DICTATION: Fn key hold-to-talk (D-03)
         hotkeyManager.onDictationKeyDown = { [weak self] in
             guard let self else { return }
-            Log.app.info("Dictation hotkey pressed — transitioning to .recording")
-            self.state = .recording
-            self.statusMessage = "录音中…"
+            Log.app.info("Dictation hotkey pressed")
+
+            // Race condition guard (T-02-12): prevent overlapping dictation pipelines
+            guard !self.isDictating else {
+                Log.app.warning("Dictation attempted while pipeline already active — ignoring")
+                return
+            }
+
+            // Guard: model must be ready before recording (D-17)
+            guard case .ready = self.modelDownloadManager.modelState else {
+                self.state = .error("语音模型未就绪——请在启动后等待模型加载完成")
+                self.iconName = "mic.fill"
+                Log.app.warning("Dictation attempted but model not ready")
+                return
+            }
+
+            do {
+                self.isDictating = true
+                try self.audioCapture.start()
+                self.state = .recording
+                self.iconName = "mic.fill.badge.ellipsis"
+                self.statusMessage = "录音中…"
+                self.hudController.show()  // D-11
+                Log.audio.info("Audio capture started for dictation")
+            } catch {
+                self.state = .error("麦克风不可用: \(error.localizedDescription)")
+                self.iconName = "mic.fill"
+                Log.audio.error("Failed to start audio capture: \(error)")
+            }
         }
 
         hotkeyManager.onDictationKeyUp = { [weak self] in
             guard let self else { return }
-            Log.app.info("Dictation hotkey released — transitioning to .idle")
-            // Phase 2: audio capture stop + transcription will be inserted here
-            self.state = .idle
-            self.statusMessage = "就绪"
+            Log.app.info("Dictation hotkey released — beginning transcription pipeline")
+
+            // 1. Read audio from ring buffer BEFORE stopping capture.
+            //    Phase 1's AudioCaptureService.stop() calls buffer.reset() which
+            //    clears all data. Must read first, stop after.
+            let audioSamples = self.audioCapture.buffer.read(
+                count: AudioConstants.maxBufferCapacity
+            )
+
+            // 2. Stop audio capture (D-07: hotkey release takes priority)
+            self.audioCapture.stop()
+
+            // 300ms minimum audio check (PITFALLS.md §2)
+            let minSamples = Int(AudioConstants.sampleRate * 0.3)
+            guard audioSamples.count >= minSamples else {
+                Log.app.info("Audio too short (\(audioSamples.count) samples < \(minSamples) min) — skipping transcription")
+                self.state = .idle
+                self.iconName = "mic.fill"
+                self.statusMessage = "就绪"
+                self.hudController.hide()
+                self.isDictating = false
+                return
+            }
+
+            // Begin transcription
+            self.state = .transcribing
+            self.iconName = "arrow.triangle.2.circlepath"
+            self.statusMessage = "转录中…"
+            self.hudController.show()  // Stay visible, message updates (D-12 auto-dismiss after)
+
+            Task { @MainActor in
+                do {
+                    let text = try await transcriptionService.transcribe(
+                        audioArray: audioSamples
+                    )
+
+                    Log.transcription.info("Transcription complete — \(text.count) chars: \"\(text.prefix(50))...\"")
+
+                    // Insert text at cursor (DICT-06)
+                    try await textIO.insertText(text)
+
+                    // Success: return to idle, dismiss HUD (D-12)
+                    self.state = .idle
+                    self.iconName = "mic.fill"
+                    self.statusMessage = "就绪"
+                    self.hudController.hide()
+                    self.isDictating = false
+                    Log.app.info("Dictation pipeline complete")
+                } catch let error as TextInsertionError {
+                    // D-19: AX fails → already auto-fallback to clipboard
+                    // Only reach here if ALL strategies failed
+                    Log.textIO.error("Text insertion failed: \(error)")
+                    self.state = .error("文字输入失败: \(error.localizedDescription)")
+                    self.iconName = "mic.fill"
+                    self.statusMessage = "输入失败——请重试"
+                    self.hudController.hide()
+                    self.isDictating = false
+
+                    // UXFE-02: Auto-reset error after 5s
+                    try? await Task.sleep(nanoseconds: 5_000_000_000)
+                    if case .error = self.state {
+                        self.state = .idle
+                    }
+                } catch let error as TranscriptionError {
+                    Log.transcription.error("Transcription failed: \(error)")
+                    self.state = .error("转录失败: \(error.localizedDescription)")
+                    self.iconName = "mic.fill"
+                    self.statusMessage = "转录失败"
+                    self.hudController.hide()
+                    self.isDictating = false
+
+                    // UXFE-02: Auto-reset error after 5s
+                    try? await Task.sleep(nanoseconds: 5_000_000_000)
+                    if case .error = self.state {
+                        self.state = .idle
+                    }
+                } catch {
+                    Log.app.error("Dictation pipeline failed: \(error)")
+                    self.state = .error("听写失败: \(error.localizedDescription)")
+                    self.iconName = "mic.fill"
+                    self.statusMessage = "听写失败"
+                    self.hudController.hide()
+                    self.isDictating = false
+
+                    // UXFE-02: Auto-reset error after 5s
+                    try? await Task.sleep(nanoseconds: 5_000_000_000)
+                    if case .error = self.state {
+                        self.state = .idle
+                    }
+                }
+            }
         }
 
-        // Correction: Ctrl+Shift+C press-to-trigger (D-04)
+        // CORRECTION: Ctrl+Shift+C (unchanged Phase 3 placeholder)
         hotkeyManager.onCorrectionKeyPress = { [weak self] in
             guard let self else { return }
             Log.app.info("Correction hotkey pressed — transitioning to .correcting")
-            // Phase 3: AI correction pipeline will be inserted here
             self.state = .correcting
             self.statusMessage = "纠错中…"
-            // Auto-reset after a short delay (placeholder until Phase 3 implementation)
             DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
                 if self?.state == .correcting {
                     self?.state = .idle
@@ -192,7 +352,7 @@ final class AppCoordinator: ObservableObject {
             }
         }
 
-        Log.app.info("Hotkey callbacks wired to AppCoordinator")
+        Log.app.info("Hotkey callbacks wired with dictation pipeline")
     }
 
     /// Sets up NotificationCenter observers for hotkey subsystem health.
@@ -264,32 +424,9 @@ final class AppCoordinator: ObservableObject {
         // WhisperKit init runs in Task.detached inside ModelDownloadManager.initialize().
         // The @Published modelState provides reactive state for Plan 03's HUD and error displays.
         Log.app.info("Starting model download/initialization in background")
+        Log.app.info("TranscriptionService created — model initialization in progress")
         await self.modelDownloadManager.initialize()
         Log.app.info("Model initialization flow started — state: \(self.modelState)")
     }
 
-    // MARK: - Audio Capture Control
-
-    /// Starts audio capture from the default microphone.
-    /// Delegates to AudioCaptureService for AVAudioEngine lifecycle management.
-    ///
-    /// Phase 1: Available for testing and Phase 2 integration.
-    /// Phase 2: Called from hotkey callbacks (onDictationKeyDown).
-    ///
-    /// - Throws: `AudioError` if the engine cannot start.
-    func startAudioCapture() throws {
-        Log.app.info("AppCoordinator: starting audio capture")
-        try audioCapture.start()
-        statusMessage = "录音中…"
-    }
-
-    /// Stops audio capture and resets the ring buffer.
-    /// Safe to call even if capture is not active.
-    ///
-    /// Phase 2: Called from hotkey callbacks (onDictationKeyUp).
-    func stopAudioCapture() {
-        Log.app.info("AppCoordinator: stopping audio capture")
-        audioCapture.stop()
-        statusMessage = "就绪"
-    }
 }

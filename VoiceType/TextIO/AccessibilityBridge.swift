@@ -35,6 +35,7 @@ private nonisolated(unsafe) let kAXIsPasswordFieldAttribute = "AXIsPasswordField
 /// AccessibilityBridge imports ONLY `ApplicationServices`. It does NOT reference
 /// `AppKit`, `NSPasteboard`, `CoreGraphics`, or any UI framework. This isolation
 /// ensures the primary strategy stays pure and independently testable.
+@MainActor
 final class AccessibilityBridge: TextIOProtocol {
 
     // MARK: - TextIOProtocol
@@ -178,6 +179,7 @@ final class AccessibilityBridge: TextIOProtocol {
 /// )
 /// try await textIO.insertText(transcribedText)
 /// ```
+@MainActor
 final class CompositeTextIO: TextIOProtocol {
     /// Primary strategy — AXUIElement direct text insertion (D-08).
     let primary: TextIOProtocol

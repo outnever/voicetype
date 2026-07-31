@@ -3,6 +3,10 @@
 /// All text insertion backends (AXUIElement, NSPasteboard, future keystroke simulation)
 /// conform to this protocol. The AppCoordinator composes these via `CompositeTextIO`
 /// to create a fallback chain (per ARCHITECTURE.md Pattern 2).
+///
+/// All methods are `@MainActor` because the underlying APIs (AXUIElement, NSPasteboard,
+/// CGEvent) are not thread-safe and must be accessed from the main thread.
+@MainActor
 protocol TextIOProtocol {
     /// Insert `text` at the current cursor position in the focused application.
     ///

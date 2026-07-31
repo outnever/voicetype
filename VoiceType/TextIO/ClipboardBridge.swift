@@ -27,6 +27,7 @@ import CoreGraphics
 /// This bridge does NOT read text from the target application. Password field
 /// detection is performed upstream by `AccessibilityBridge` at the composite level.
 /// `isPasswordField()` always returns `false` — the check is delegated.
+@MainActor
 final class ClipboardBridge: TextIOProtocol {
 
     // MARK: - TextIOProtocol
