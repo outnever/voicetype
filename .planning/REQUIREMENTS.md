@@ -30,7 +30,7 @@ Requirements for initial release. Each maps to roadmap phases.
 - [x] **DICT-03**: Dictation works offline using local Whisper model (no internet required)
 - [x] **DICT-04**: Transcription output includes auto-punctuation and capitalization
 - [x] **DICT-05**: Filler words ("um", "uh", "you know") are removed from output
-- [ ] **DICT-06**: Text insertion works across all target apps via AXUIElement with clipboard fallback
+- [x] **DICT-06**: Text insertion works across all target apps via AXUIElement with clipboard fallback
 - [ ] **DICT-07**: User sees a visual recording indicator (menu bar icon / HUD) during dictation
 - [x] **DICT-08**: Basic word error rate (WER) below 10-15% for Chinese and English dictation
 
@@ -107,7 +107,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | DICT-03 | Phase 2 | Pending |
 | DICT-04 | Phase 2 | Pending |
 | DICT-05 | Phase 2 | Pending |
-| DICT-06 | Phase 2 | Pending |
+| DICT-06 | Phase 2 | Complete |
 | DICT-07 | Phase 2 | Pending |
 | DICT-08 | Phase 2 | Pending |
 | CORR-01 | Phase 3 | Pending |

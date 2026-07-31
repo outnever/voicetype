@@ -50,11 +50,12 @@ Plans:
   4. 发生错误时（麦克风故障、模型未加载、权限丢失），应用显示具体错误原因并给出修复指引
   5. 中英文双语听写均支持，基础词错率（WER）低于 15%
 
-**Plans**: 3 plans
+**Plans**: 2/3 plans executed
 
 Plans:
+
 - [x] 02-01-PLAN.md — WhisperKit Integration: ModelDownloadManager + TranscriptionService (VAD, punctuation, filler removal, bilingual)
-- [ ] 02-02-PLAN.md — Text I/O: AccessibilityBridge primary + ClipboardBridge fallback with save/restore
+- [x] 02-02-PLAN.md — Text I/O: AccessibilityBridge primary + ClipboardBridge fallback with save/restore
 - [ ] 02-03-PLAN.md — Dictation Flow + HUD: wire pipeline into AppCoordinator, recording overlay, menu bar state
 
 **UI hint**: yes
@@ -83,5 +84,5 @@ Phases execute in numeric order: 1 → 2 → 3
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Foundation | 3/3 | Complete   | 2026-07-30 |
-| 2. Core Dictation | 0/3 | Planned | - |
+| 2. Core Dictation | 2/3 | In Progress|  |
 | 3. AI Correction | 0/0 | Not started | - |
