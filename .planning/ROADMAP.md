@@ -53,7 +53,7 @@ Plans:
 **Plans**: 3 plans
 
 Plans:
-- [ ] 02-01-PLAN.md — WhisperKit Integration: ModelDownloadManager + TranscriptionService (VAD, punctuation, filler removal, bilingual)
+- [x] 02-01-PLAN.md — WhisperKit Integration: ModelDownloadManager + TranscriptionService (VAD, punctuation, filler removal, bilingual)
 - [ ] 02-02-PLAN.md — Text I/O: AccessibilityBridge primary + ClipboardBridge fallback with save/restore
 - [ ] 02-03-PLAN.md — Dictation Flow + HUD: wire pipeline into AppCoordinator, recording overlay, menu bar state
 

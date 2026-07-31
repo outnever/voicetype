@@ -27,12 +27,12 @@ Requirements for initial release. Each maps to roadmap phases.
 
 - [ ] **DICT-01**: User can hold dictation hotkey, speak, release, and transcribed text appears at cursor in any application
 - [ ] **DICT-02**: VAD (Voice Activity Detection) auto-detects when user stops speaking, no manual stop required
-- [ ] **DICT-03**: Dictation works offline using local Whisper model (no internet required)
-- [ ] **DICT-04**: Transcription output includes auto-punctuation and capitalization
-- [ ] **DICT-05**: Filler words ("um", "uh", "you know") are removed from output
+- [x] **DICT-03**: Dictation works offline using local Whisper model (no internet required)
+- [x] **DICT-04**: Transcription output includes auto-punctuation and capitalization
+- [x] **DICT-05**: Filler words ("um", "uh", "you know") are removed from output
 - [ ] **DICT-06**: Text insertion works across all target apps via AXUIElement with clipboard fallback
 - [ ] **DICT-07**: User sees a visual recording indicator (menu bar icon / HUD) during dictation
-- [ ] **DICT-08**: Basic word error rate (WER) below 10-15% for Chinese and English dictation
+- [x] **DICT-08**: Basic word error rate (WER) below 10-15% for Chinese and English dictation
 
 ### AI Correction
 
@@ -49,7 +49,7 @@ Requirements for initial release. Each maps to roadmap phases.
 
 - [ ] **UXFE-01**: User always sees current app state (idle / recording / transcribing / correcting) via menu bar icon
 - [ ] **UXFE-02**: Error states (audio failure, model load failure, permission loss) are surfaced to user with recovery guidance
-- [ ] **UXFE-03**: Bilingual Chinese + English dictation and correction supported out of the box
+- [x] **UXFE-03**: Bilingual Chinese + English dictation and correction supported out of the box
 
 ## v2 Requirements
 
