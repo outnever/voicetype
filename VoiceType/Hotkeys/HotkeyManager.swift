@@ -8,7 +8,8 @@ import Logging
 /// - holdToTalk: ⌥+空格 按住说话、松手结束（听写）
 /// - pressToTrigger: Ctrl+Shift+C 按下即触发（纠错）
 ///
-/// 所有状态通知通过 coordinator 回调或 NotificationCenter 派发到主线程。
+/// 匹配到的热键事件会被吞掉（return nil），不会传递给前台应用。
+/// 其他按键事件正常透传。
 final class HotkeyManager: @unchecked Sendable {
 
     private var eventTap: CFMachPort?
@@ -22,16 +23,11 @@ final class HotkeyManager: @unchecked Sendable {
     private let dictationKeyCode: Int64 = 49   // kVK_Space
     private let dictationModifiers: CGEventFlags = .maskAlternate  // Option (⌥)
     private let correctionKeyCode: Int64 = 8   // kVK_ANSI_C
-    private let correctionModifiers: CGEventFlags = [.maskControl, .maskShift]
 
     // MARK: - 状态跟踪
 
-    /// 听写热键当前是否被按住
     private var isDictationKeyDown: Bool = false
-
-    /// 防止纠错热键在同一次按键周期中重复触发
     private var correctionFiredInCurrentCycle: Bool = false
-
     private var lastEventTimestamp: Date = Date()
     private var watchdogTimer: DispatchSourceTimer?
 
@@ -118,7 +114,6 @@ final class HotkeyManager: @unchecked Sendable {
 
     func unregister() {
         guard isRegistered else { return }
-
         Log.hotkey.info("取消注册 CGEvent tap")
         stopWatchdog()
 
@@ -137,7 +132,6 @@ final class HotkeyManager: @unchecked Sendable {
         isRegistered = false
         isDictationKeyDown = false
         correctionFiredInCurrentCycle = false
-
         Log.hotkey.info("HotkeyManager 已取消注册")
     }
 
@@ -153,15 +147,20 @@ final class HotkeyManager: @unchecked Sendable {
 
     // MARK: - 事件分发
 
+    /// 返回 nil 表示吞掉事件（热键已匹配），返回 event 表示透传。
     private func handleCGEvent(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
         lastEventTimestamp = Date()
 
         switch type {
         case .keyDown:
-            handleKeyEvent(event: event, isKeyDown: true)
+            if handleKeyEvent(event: event, isKeyDown: true) {
+                return nil  // 热键已消费，不传递给前台应用
+            }
 
         case .keyUp:
-            handleKeyEvent(event: event, isKeyDown: false)
+            if handleKeyEvent(event: event, isKeyDown: false) {
+                return nil
+            }
 
         case .flagsChanged:
             handleFlagsChanged(event: event)
@@ -172,9 +171,9 @@ final class HotkeyManager: @unchecked Sendable {
             if let tap = eventTap {
                 CGEvent.tapEnable(tap: tap, enable: true)
                 if CGEvent.tapIsEnabled(tap: tap) {
-                    Log.hotkey.info("Event tap 已恢复 (\(reason))")
+                    Log.hotkey.info("Event tap 已恢复")
                 } else {
-                    Log.hotkey.error("Event tap 恢复失败 (\(reason))")
+                    Log.hotkey.error("Event tap 恢复失败")
                     DispatchQueue.main.async {
                         NotificationCenter.default.post(name: .hotkeyTapDisabled, object: nil)
                     }
@@ -188,31 +187,32 @@ final class HotkeyManager: @unchecked Sendable {
         return Unmanaged.passUnretained(event)
     }
 
-    // MARK: - 按键事件
+    // MARK: - 按键处理
 
-    private func handleKeyEvent(event: CGEvent, isKeyDown: Bool) {
+    /// 返回 true 表示事件已消费（热键匹配），应吞掉不传递。
+    @discardableResult
+    private func handleKeyEvent(event: CGEvent, isKeyDown: Bool) -> Bool {
         let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
         let flags = event.flags
 
         // 听写: ⌥+空格 (hold-to-talk)
-        if keyCode == dictationKeyCode {
-            let optionHeld = flags.contains(.maskAlternate)
-            if optionHeld {
-                if isKeyDown && !isDictationKeyDown {
-                    isDictationKeyDown = true
-                    Log.hotkey.info("听写热键按下: ⌥+空格")
-                    DispatchQueue.main.async { [weak self] in
-                        self?.coordinator?.onDictationKeyDown?()
-                        self?.onDictationKeyDown?()
-                    }
-                } else if !isKeyDown && isDictationKeyDown {
-                    isDictationKeyDown = false
-                    Log.hotkey.info("听写热键释放: ⌥+空格")
-                    DispatchQueue.main.async { [weak self] in
-                        self?.coordinator?.onDictationKeyUp?()
-                        self?.onDictationKeyUp?()
-                    }
+        if keyCode == dictationKeyCode, flags.contains(.maskAlternate) {
+            if isKeyDown && !isDictationKeyDown {
+                isDictationKeyDown = true
+                Log.hotkey.info("听写热键按下: ⌥+空格")
+                DispatchQueue.main.async { [weak self] in
+                    self?.coordinator?.onDictationKeyDown?()
+                    self?.onDictationKeyDown?()
                 }
+                return true
+            } else if !isKeyDown && isDictationKeyDown {
+                isDictationKeyDown = false
+                Log.hotkey.info("听写热键释放")
+                DispatchQueue.main.async { [weak self] in
+                    self?.coordinator?.onDictationKeyUp?()
+                    self?.onDictationKeyUp?()
+                }
+                return true
             }
         }
 
@@ -228,23 +228,21 @@ final class HotkeyManager: @unchecked Sendable {
                     self?.coordinator?.onCorrectionKeyPress?()
                     self?.onCorrectionKeyPress?()
                 }
+                return true
             }
             if !isKeyDown {
                 correctionFiredInCurrentCycle = false
             }
         }
+
+        return false
     }
 
-    /// 处理修饰键变化（Fn 键等发送 flagsChanged 而非 keyDown/keyUp）。
-    /// 目前仅用于 Option 键的状态跟踪——如果用户在松开空格前先松开了 Option，
-    /// 下一次 keyUp 会检测到 Option 已不在 flags 中，视为 dictation 结束。
+    /// 跟踪 Option 键——如果用户在松开空格前先松了 Option，视为听写结束。
     private func handleFlagsChanged(event: CGEvent) {
-        let flags = event.flags
-
-        // 如果 Option 键在听写期间被释放而空格还按着，也结束听写
-        if isDictationKeyDown && !flags.contains(.maskAlternate) {
+        if isDictationKeyDown && !event.flags.contains(.maskAlternate) {
             isDictationKeyDown = false
-            Log.hotkey.info("听写结束: Option 键提前释放")
+            Log.hotkey.info("听写结束: Option 提前释放")
             DispatchQueue.main.async { [weak self] in
                 self?.coordinator?.onDictationKeyUp?()
                 self?.onDictationKeyUp?()
@@ -255,11 +253,7 @@ final class HotkeyManager: @unchecked Sendable {
     // MARK: - Watchdog
 
     func startWatchdog(interval: TimeInterval = 5.0) {
-        guard isRegistered else {
-            Log.hotkey.warning("无法启动 watchdog — HotkeyManager 未注册")
-            return
-        }
-
+        guard isRegistered else { return }
         Log.hotkey.info("启动 watchdog（间隔 \(interval) 秒）")
 
         let timer = DispatchSource.makeTimerSource(queue: .global(qos: .utility))
@@ -290,13 +284,13 @@ final class HotkeyManager: @unchecked Sendable {
                 Log.hotkey.info("Watchdog: tap 已恢复")
                 lastEventTimestamp = Date()
             } else {
-                Log.hotkey.error("Watchdog: tap 恢复失败")
+                Log.hotkey.error("Watchdog: 恢复失败")
                 DispatchQueue.main.async {
                     NotificationCenter.default.post(name: .hotkeyTapDisabled, object: nil)
                 }
             }
         } else if timeSinceLastEvent > 30 {
-            Log.hotkey.warning("Watchdog: \(Int(timeSinceLastEvent)) 秒无事件 — tap 可能静默失效")
+            Log.hotkey.warning("Watchdog: \(Int(timeSinceLastEvent)) 秒无事件")
             CGEvent.tapEnable(tap: tap, enable: true)
             DispatchQueue.main.async {
                 NotificationCenter.default.post(name: .hotkeyTapDisabled, object: nil)
@@ -304,8 +298,6 @@ final class HotkeyManager: @unchecked Sendable {
         }
     }
 }
-
-// MARK: - Notification 名称
 
 extension Notification.Name {
     static let hotkeyTapDisabled = Notification.Name("com.voicetype.hotkey.tapDisabled")
