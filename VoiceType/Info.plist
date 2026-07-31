@@ -24,5 +24,7 @@
 	<true/>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>VoiceType 需要用麦克风将你说的转化成文字。录音仅在按住听写键时进行，数据不会上传或存储。</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>VoiceType 使用系统语音识别将你说的话转成文字。语音会发送到 Apple 服务器进行识别。</string>
 </dict>
 </plist>

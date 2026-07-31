@@ -25,4 +25,7 @@ enum Log {
 
     /// TextIO subsystem logger (AXUIElement writes, clipboard operations, fallback chains)
     static let textIO = Logger(label: "com.voicetype.app.textio")
+
+    /// Apple speech recognition subsystem logger (SFSpeechRecognizer session lifecycle)
+    static let speech = Logger(label: "com.voicetype.app.speech")
 }

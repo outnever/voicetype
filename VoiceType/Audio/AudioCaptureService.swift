@@ -72,6 +72,10 @@ final class AudioCaptureService: @unchecked Sendable {
     /// Lock protecting engine lifecycle state (start/stop/config).
     private var stateLock = os_unfair_lock()
 
+    /// 流式识别回调——把原始 AVAudioPCMBuffer 转发给 Apple SFSpeechRecognizer。
+    /// 由 AppCoordinator 在识别会话期间设置，AudioCaptureService 不持有识别器。
+    var onAudioBuffer: ((AVAudioPCMBuffer) -> Void)?
+
     // MARK: - Device Monitoring
 
     /// Tracks whether device monitoring observers are registered.
@@ -137,6 +141,11 @@ final class AudioCaptureService: @unchecked Sendable {
             format: inputFormat  // tap delivers in hardware format; we convert below
         ) { [weak self] pcmBuffer, _ in
             guard let self else { return }
+
+            // 流式识别：把原始 buffer 转发给 Apple SFSpeechRecognizer（若会话激活）
+            if let onAudioBuffer = self.onAudioBuffer {
+                onAudioBuffer(pcmBuffer)
+            }
 
             // Calculate target capacity based on sample rate ratio
             let targetCapacity = AVAudioFrameCount(

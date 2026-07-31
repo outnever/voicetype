@@ -50,13 +50,16 @@ final class AppCoordinator: ObservableObject {
 
     // MARK: - Phase 2 Subsystems (Transcription)
 
+    /// Apple 语音识别服务（SFSpeechRecognizer）——流式识别，云端免费。
+    /// 替代 WhisperKit 离线方案：零模型下载、简体中文输出、跨 Apple 设备。
+    let appleSpeech = AppleSpeechService()
+
     /// Model download manager — handles WhisperKit model download and lifecycle.
-    /// Creates the shared WhisperKit pipe, exposes @Published modelState for UI.
-    /// Model download begins in initializeSubsystems() — does not block menu bar startup.
+    /// 保留用于"离线模式"选项（v1 默认不使用，Apple 识别为主）。
     let modelDownloadManager = ModelDownloadManager()
 
     /// Transcription service — wraps the shared WhisperKit pipe for speech-to-text.
-    /// Available immediately but functional only after modelDownloadManager.initialize() completes.
+    /// 保留用于"离线模式"选项。
     let transcriptionService: TranscriptionService!
 
     // MARK: - Phase 2 Subsystems (TextIO)
@@ -220,71 +223,75 @@ final class AppCoordinator: ObservableObject {
                 return
             }
 
-            // Guard: model must be ready before recording (D-17)
-            guard case .ready = self.modelDownloadManager.modelState else {
-                self.state = .error("语音模型未就绪——请在启动后等待模型加载完成")
-                self.iconName = "mic.fill"
-                Log.app.warning("Dictation attempted but model not ready")
-                return
-            }
+            // 请求识别权限（首次会弹 TCC 窗口）
+            self.isDictating = true
+            self.state = .recording
+            self.iconName = "mic.fill.badge.ellipsis"
+            self.statusMessage = "录音中…"
+            self.hudController.show()  // D-11
+            Log.app.info("Starting Apple speech recognition session")
 
-            do {
-                self.isDictating = true
-                try self.audioCapture.start()
-                self.state = .recording
-                self.iconName = "mic.fill.badge.ellipsis"
-                self.statusMessage = "录音中…"
-                self.hudController.show()  // D-11
-                Log.audio.info("Audio capture started for dictation")
-            } catch {
-                self.state = .error("麦克风不可用: \(error.localizedDescription)")
-                self.iconName = "mic.fill"
-                Log.audio.error("Failed to start audio capture: \(error)")
+            Task { @MainActor in
+                guard await self.appleSpeech.requestAuthorization() else {
+                    self.state = .error("语音识别权限被拒绝——请在系统设置中开启")
+                    self.iconName = "mic.fill"
+                    self.statusMessage = "需要语音识别权限"
+                    self.hudController.hide()
+                    self.isDictating = false
+                    return
+                }
+
+                // 启动流式识别会话，把音频 buffer 转发给识别器
+                do {
+                    let request = try self.appleSpeech.startSession()
+                    self.audioCapture.onAudioBuffer = { buffer in
+                        request.append(buffer)
+                    }
+                    try self.audioCapture.start()
+                    Log.audio.info("Audio capture + Apple speech recognition started")
+                } catch {
+                    self.state = .error("麦克风不可用: \(error.localizedDescription)")
+                    self.iconName = "mic.fill"
+                    self.statusMessage = "麦克风不可用"
+                    self.hudController.hide()
+                    self.isDictating = false
+                    Log.audio.error("Failed to start audio capture: \(error)")
+                }
             }
         }
 
         hotkeyManager.onDictationKeyUp = { [weak self] in
             guard let self else { return }
-            Log.app.info("Dictation hotkey released — beginning transcription pipeline")
+            Log.app.info("Dictation hotkey released — finishing speech recognition")
 
-            // 1. Read audio from ring buffer BEFORE stopping capture.
-            //    Phase 1's AudioCaptureService.stop() calls buffer.reset() which
-            //    clears all data. Must read first, stop after.
-            let audioSamples = self.audioCapture.buffer.read(
-                count: AudioConstants.maxBufferCapacity
-            )
+            guard self.isDictating else { return }
 
-            // 2. Stop audio capture (D-07: hotkey release takes priority)
+            // 停止音频采集（先解绑 buffer 转发再停）
+            self.audioCapture.onAudioBuffer = nil
             self.audioCapture.stop()
 
-            // 300ms minimum audio check (PITFALLS.md §2)
-            let minSamples = Int(AudioConstants.sampleRate * 0.3)
-            guard audioSamples.count >= minSamples else {
-                Log.app.info("Audio too short (\(audioSamples.count) samples < \(minSamples) min) — skipping transcription")
-                self.state = .idle
-                self.iconName = "mic.fill"
-                self.statusMessage = "就绪"
-                self.hudController.hide()
-                self.isDictating = false
-                return
-            }
-
-            // Begin transcription
             self.state = .transcribing
             self.iconName = "arrow.triangle.2.circlepath"
             self.statusMessage = "转录中…"
-            self.hudController.show()  // Stay visible, message updates (D-12 auto-dismiss after)
 
             Task { @MainActor in
+                // 结束识别会话，拿到最终文本
+                let text = await self.appleSpeech.finishSession()
+                Log.speech.info("Final transcription: \"\(text)\"")
+
+                guard !text.isEmpty else {
+                    self.state = .idle
+                    self.iconName = "mic.fill"
+                    self.statusMessage = "就绪"
+                    self.hudController.hide()
+                    self.isDictating = false
+                    Log.app.info("Empty transcription — no text inserted")
+                    return
+                }
+
                 do {
-                    let text = try await transcriptionService.transcribe(
-                        audioArray: audioSamples
-                    )
-
-                    Log.transcription.info("Transcription complete — \(text.count) chars: \"\(text.prefix(50))...\"")
-
                     // Insert text at cursor (DICT-06)
-                    try await textIO.insertText(text)
+                    try await self.textIO.insertText(text)
 
                     // Success: return to idle, dismiss HUD (D-12)
                     self.state = .idle
@@ -295,24 +302,10 @@ final class AppCoordinator: ObservableObject {
                     Log.app.info("Dictation pipeline complete")
                 } catch let error as TextInsertionError {
                     // D-19: AX fails → already auto-fallback to clipboard
-                    // Only reach here if ALL strategies failed
                     Log.textIO.error("Text insertion failed: \(error)")
                     self.state = .error("文字输入失败: \(error.localizedDescription)")
                     self.iconName = "mic.fill"
                     self.statusMessage = "输入失败——请重试"
-                    self.hudController.hide()
-                    self.isDictating = false
-
-                    // UXFE-02: Auto-reset error after 5s
-                    try? await Task.sleep(nanoseconds: 5_000_000_000)
-                    if case .error = self.state {
-                        self.state = .idle
-                    }
-                } catch let error as TranscriptionError {
-                    Log.transcription.error("Transcription failed: \(error)")
-                    self.state = .error("转录失败: \(error.localizedDescription)")
-                    self.iconName = "mic.fill"
-                    self.statusMessage = "转录失败"
                     self.hudController.hide()
                     self.isDictating = false
 
@@ -338,7 +331,7 @@ final class AppCoordinator: ObservableObject {
             }
         }
 
-        // CORRECTION: Ctrl+Shift+C (unchanged Phase 3 placeholder)
+        // CORRECTION: ⌥+回车 (unchanged Phase 3 placeholder)
         hotkeyManager.onCorrectionKeyPress = { [weak self] in
             guard let self else { return }
             Log.app.info("Correction hotkey pressed — transitioning to .correcting")
@@ -420,13 +413,9 @@ final class AppCoordinator: ObservableObject {
             }
         }
 
-        // Begin async model download/loading — does not block menu bar.
-        // WhisperKit init runs in Task.detached inside ModelDownloadManager.initialize().
-        // The @Published modelState provides reactive state for Plan 03's HUD and error displays.
-        Log.app.info("Starting model download/initialization in background")
-        Log.app.info("TranscriptionService created — model initialization in progress")
-        await self.modelDownloadManager.initialize()
-        Log.app.info("Model initialization flow started — state: \(self.modelState)")
+        // Apple 语音识别为主（SFSpeechRecognizer，云端免费）。
+        // WhisperKit 离线模式保留但默认不加载（避免 150MB 内存占用）。
+        Log.app.info("Using Apple speech recognition (SFSpeechRecognizer) — WhisperKit offline mode disabled")
     }
 
 }
