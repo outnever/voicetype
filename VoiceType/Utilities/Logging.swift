@@ -19,4 +19,10 @@ enum Log {
 
     /// Permission subsystem logger (TCC status checks, permission requests)
     static let permission = Logger(label: "com.voicetype.app.permission")
+
+    /// Transcription subsystem logger (model download, WhisperKit inference, filler word removal)
+    static let transcription = Logger(label: "com.voicetype.app.transcription")
+
+    /// TextIO subsystem logger (AXUIElement writes, clipboard operations, fallback chains)
+    static let textIO = Logger(label: "com.voicetype.app.textio")
 }
