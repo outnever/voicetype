@@ -110,18 +110,14 @@ struct MenuBarView: View {
 
     private func openSettings() {
         Log.app.info("菜单栏：打开偏好设置")
+        WindowManager.ensureActiveApp()
         openWindow(id: "settings")
-        DispatchQueue.main.async {
-            NSApp.activate(ignoringOtherApps: true)
-        }
     }
 
     private func openPermissionGate() {
         Log.app.info("菜单栏：打开权限引导")
+        WindowManager.ensureActiveApp()
         openWindow(id: "permission-gate")
-        DispatchQueue.main.async {
-            NSApp.activate(ignoringOtherApps: true)
-        }
     }
 
     private func quitApp() {
