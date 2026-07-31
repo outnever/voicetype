@@ -4,7 +4,7 @@ import Foundation
 ///
 /// All errors conform to `LocalizedError` with Chinese-language descriptions
 /// suitable for user-facing error messages in the VoiceType menu bar / HUD.
-enum TranscriptionError: Error, LocalizedError {
+enum TranscriptionError: Error, LocalizedError, Equatable {
     /// The WhisperKit pipe has not been loaded — model download/initialization is pending.
     case modelNotDownloaded
 
@@ -16,6 +16,25 @@ enum TranscriptionError: Error, LocalizedError {
 
     /// Audio array is too short for meaningful transcription (< 300ms per PITFALLS.md §2).
     case audioTooShort
+
+    // MARK: - Equatable
+
+    /// Custom Equatable: cases with Error associated values are compared by case label only
+    /// (Error is not Equatable). Two `.modelNotDownloaded` cases are equal, etc.
+    static func == (lhs: TranscriptionError, rhs: TranscriptionError) -> Bool {
+        switch (lhs, rhs) {
+        case (.modelNotDownloaded, .modelNotDownloaded):
+            return true
+        case (.modelDownloadFailed, .modelDownloadFailed):
+            return true
+        case (.transcriptionFailed, .transcriptionFailed):
+            return true
+        case (.audioTooShort, .audioTooShort):
+            return true
+        default:
+            return false
+        }
+    }
 
     // MARK: - LocalizedError
 
