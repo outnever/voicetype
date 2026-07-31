@@ -53,10 +53,17 @@ final class ModelDownloadManager: ObservableObject {
     /// 生产环境切换为 "openai_whisper-large-v3-v20240930_626MB"。
     private static let devModelName = "openai_whisper-tiny"
 
+    /// WhisperKit 默认的本地模型缓存根目录（HubApi 默认值）。
+    private static let localModelBase = FileManager.default
+        .urls(for: .documentDirectory, in: .userDomainMask)
+        .first!
+        .appending(path: "huggingface/models/argmaxinc/whisperkit-coreml")
+
     /// 下载并加载 WhisperKit 模型。
     ///
+    /// 优先使用本地已有模型（离线加载，绕过 HubApi 元数据 bug）；
+    /// 本地不存在时通过 hf-mirror.com 在线下载。
     /// - Parameter modelName: HuggingFace 模型标识。
-    /// - Note: 通过 HF_ENDPOINT 环境变量指向 hf-mirror.com，国内可直连。
     func initialize(modelName: String = ModelDownloadManager.devModelName) async {
         // Guard against duplicate calls — if already downloading or ready, skip.
         switch modelState {
@@ -72,12 +79,28 @@ final class ModelDownloadManager: ObservableObject {
 
         // 在 Task.detached 外捕获值，避免 @MainActor 隔离冲突
         let mirrorURL = Self.hfMirrorURL
+        let localModelFolder = Self.localModelBase.appending(path: modelName)
 
         do {
             let newPipe = try await Task.detached(priority: .userInitiated) {
-                Log.transcription.info("WhisperKit: initializing with model \(modelName) via \(mirrorURL)")
+                let localExists = FileManager.default.fileExists(
+                    atPath: localModelFolder.appending(path: "config.json").path
+                )
 
-                // 通过 modelEndpoint 指定 HuggingFace 镜像（国内可直连，无需翻墙）
+                if localExists {
+                    // 本地模型存在 —— 离线加载，绕过在线元数据检查
+                    Log.transcription.info("WhisperKit: 发现本地模型，离线加载 \(localModelFolder.path)")
+                    let config = WhisperKitConfig(
+                        modelFolder: localModelFolder.path,
+                        verbose: false,
+                        logLevel: .error,
+                        download: false
+                    )
+                    return try await WhisperKit(config)
+                }
+
+                // 本地不存在 —— 从 hf-mirror.com 在线下载
+                Log.transcription.info("WhisperKit: 本地无模型，从 \(mirrorURL) 下载 \(modelName)")
                 let config = WhisperKitConfig(
                     model: modelName,
                     modelEndpoint: mirrorURL,
@@ -85,9 +108,7 @@ final class ModelDownloadManager: ObservableObject {
                     logLevel: .error,
                     download: true
                 )
-                let pipe = try await WhisperKit(config)
-                Log.transcription.info("WhisperKit: model initialized successfully — \(modelName)")
-                return pipe
+                return try await WhisperKit(config)
             }.value
 
             self.pipe = newPipe
