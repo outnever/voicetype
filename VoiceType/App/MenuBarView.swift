@@ -29,9 +29,10 @@ struct MenuBarView: View {
                 .font(.headline)
 
             HStack(spacing: 6) {
-                Circle()
-                    .fill(statusColor)
-                    .frame(width: 8, height: 8)
+                // 当前状态图标（跟随 coordinator.iconName 动态切换）
+                Image(systemName: coordinator.iconName)
+                    .font(.caption)
+                    .foregroundColor(statusColor)
 
                 Text(coordinator.statusMessage)
                     .font(.subheadline)
@@ -100,11 +101,30 @@ struct MenuBarView: View {
 
     // MARK: - 辅助
 
+    // MARK: - 辅助
+
+    /// 状态指示颜色——综合权限状态和当前运行状态。
+    ///
+    /// - 权限未就绪：红/橙（与 Phase 1 行为一致）
+    /// - 录音中 / 转录中 / 纠错中：蓝色（活跃状态）
+    /// - 错误：红色
+    /// - 就绪：绿色
     private var statusColor: Color {
+        // 权限优先——未授权时始终显示警告色
         switch coordinator.permissionStatus {
-        case .allGranted:  return .green
-        case .partial:     return .orange
         case .noneGranted: return .red
+        case .partial:     return .orange
+        case .allGranted:  break
+        }
+
+        // 权限就绪后，根据运行状态切换颜色
+        switch coordinator.state {
+        case .recording, .transcribing, .correcting:
+            return .blue
+        case .error:
+            return .red
+        case .idle:
+            return .green
         }
     }
 
