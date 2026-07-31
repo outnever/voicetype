@@ -61,6 +61,7 @@ struct TextInsertionErrorTests {
 // MARK: - AccessibilityBridge Tests
 
 @Suite("AccessibilityBridge")
+@MainActor
 struct AccessibilityBridgeTests {
 
     @Test("Conforms to TextIOProtocol")
@@ -101,6 +102,7 @@ struct AccessibilityBridgeTests {
 // MARK: - ClipboardBridge Tests
 
 @Suite("ClipboardBridge")
+@MainActor
 struct ClipboardBridgeTests {
 
     @Test("Conforms to TextIOProtocol")
@@ -177,6 +179,7 @@ private final class MockTrackingBridge: TextIOProtocol {
 // MARK: - CompositeTextIO Tests
 
 @Suite("CompositeTextIO")
+@MainActor
 struct CompositeTextIOTests {
 
     @Test("Primary path succeeds — fallback is never called")

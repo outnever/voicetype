@@ -36,10 +36,12 @@ done
 echo "✅ 模型下载完成: $COUNT 个文件"
 echo "模型位置: $DEST"
 
-# 下载 tokenizer（WhisperKit 需要 openai/whisper-tiny 仓库的 tokenizer.json）
+# 下载 tokenizer 全套文件（WhisperKit 需要 openai/whisper-tiny 仓库的 tokenizer 配置）
 TOKENIZER_REPO="openai/whisper-tiny"
 TOKENIZER_DEST="$HOME/Documents/huggingface/models/$TOKENIZER_REPO"
 echo "📥 下载 tokenizer → $TOKENIZER_DEST"
 mkdir -p "$TOKENIZER_DEST"
-curl -sL --max-time 120 -o "$TOKENIZER_DEST/tokenizer.json" "$MIRROR/$TOKENIZER_REPO/resolve/main/tokenizer.json"
-echo "✅ tokenizer 下载完成"
+for tf in tokenizer.json tokenizer_config.json merges.txt vocab.json added_tokens.json special_tokens_map.json normalizer.json; do
+    curl -sL --max-time 120 -o "$TOKENIZER_DEST/$tf" "$MIRROR/$TOKENIZER_REPO/resolve/main/$tf"
+done
+echo "✅ tokenizer 全套下载完成"
