@@ -23,6 +23,14 @@ let package = Package(
                 .product(name: "Logging", package: "swift-log"),
             ],
             path: "VoiceType"
+        ),
+        .testTarget(
+            name: "VoiceTypeTests",
+            dependencies: [
+                "VoiceType",
+                .product(name: "WhisperKit", package: "argmax-oss-swift"),
+            ],
+            path: "Tests/VoiceTypeTests"
         )
     ]
 )
