@@ -14,13 +14,12 @@ struct HotkeyDefinition {
 }
 
 enum HotkeyDefaults {
-    /// 听写热键: ⌥+空格 (hold-to-talk)
-    /// Option+Space 是语音输入工具的行业标准 (Wispr Flow, Superwhisper 均用此键)
+    /// 听写热键: Fn (hold-to-talk)，通过 flagsChanged 中 .maskSecondaryFn 检测
     static let dictation = HotkeyDefinition(
-        keyCode: 49,  // kVK_Space
-        modifiers: .maskAlternate,  // Option (⌥)
+        keyCode: 63,  // kVK_Function
+        modifiers: [],
         mode: .holdToTalk,
-        description: "⌥ 空格 (按住说话)"
+        description: "Fn (按住说话)"
     )
 
     /// 纠错热键: Ctrl+Shift+C (press-to-trigger)

@@ -12,7 +12,7 @@ enum Defaults {
 
     /// Display string for the dictation hotkey shown in Settings.
     /// v1 default: Fn (hold-to-talk). v2 will allow customization.
-    static let dictationKeyDisplay = "⌥ 空格 (按住说话)"
+    static let dictationKeyDisplay = "Fn (按住说话)"
 
     /// Display string for the correction hotkey shown in Settings.
     /// v1 default: Ctrl+Shift+C (press-to-trigger). v2 will allow customization.

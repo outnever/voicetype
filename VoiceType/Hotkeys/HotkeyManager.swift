@@ -4,12 +4,11 @@ import Logging
 
 /// 系统级全局热键管理器，通过 CGEvent tap 监听按键。
 ///
-/// 两种热键模式:
-/// - holdToTalk: ⌥+空格 按住说话、松手结束（听写）
-/// - pressToTrigger: Ctrl+Shift+C 按下即触发（纠错）
+/// 热键:
+/// - 听写: Fn 键按住说话、松手结束（通过 flagsChanged 检测 .maskSecondaryFn）
+/// - 纠错: Ctrl+Shift+C 按下即触发
 ///
-/// 匹配到的热键事件会被吞掉（return nil），不会传递给前台应用。
-/// 其他按键事件正常透传。
+/// 匹配到的热键事件会被吞掉（return nil），不传递给前台应用。
 final class HotkeyManager: @unchecked Sendable {
 
     private var eventTap: CFMachPort?
@@ -18,47 +17,32 @@ final class HotkeyManager: @unchecked Sendable {
 
     weak var coordinator: AppCoordinator?
 
-    // MARK: - 按键常量
-
-    private let dictationKeyCode: Int64 = 49   // kVK_Space
-    private let dictationModifiers: CGEventFlags = .maskAlternate  // Option (⌥)
     private let correctionKeyCode: Int64 = 8   // kVK_ANSI_C
 
-    // MARK: - 状态跟踪
-
-    private var isDictationKeyDown: Bool = false
-    private var correctionFiredInCurrentCycle: Bool = false
+    private var isFnDown: Bool = false
+    private var correctionFired: Bool = false
     private var lastEventTimestamp: Date = Date()
     private var watchdogTimer: DispatchSourceTimer?
-    private var watchdogAlreadyWarned: Bool = false
+    private var watchdogWarned: Bool = false
 
     private(set) var isRegistered: Bool = false
-
-    // MARK: - 回调
 
     var onDictationKeyDown: (() -> Void)?
     var onDictationKeyUp: (() -> Void)?
     var onCorrectionKeyPress: (() -> Void)?
 
-    // MARK: -
-
     init() {
         Log.hotkey.info("HotkeyManager 已初始化")
     }
 
-    deinit {
-        unregister()
-    }
+    deinit { unregister() }
 
     // MARK: - 注册
 
     func register() throws {
-        guard !isRegistered else {
-            Log.hotkey.warning("HotkeyManager 已注册，跳过重复调用")
-            throw HotkeyError.alreadyRegistered
-        }
+        guard !isRegistered else { throw HotkeyError.alreadyRegistered }
 
-        Log.hotkey.info("注册 CGEvent tap（听写: ⌥+空格, 纠错: ⌃⇧C）")
+        Log.hotkey.info("注册 CGEvent tap（听写: Fn, 纠错: ⌃⇧C）")
 
         let eventMask: CGEventMask = (
             (1 << CGEventType.keyDown.rawValue) |
@@ -73,27 +57,26 @@ final class HotkeyManager: @unchecked Sendable {
             place: .headInsertEventTap,
             options: .defaultTap,
             eventsOfInterest: eventMask,
-            callback: HotkeyManager.eventTapCallback,
+            callback: Self.callback,
             userInfo: Unmanaged.passUnretained(self).toOpaque()
         ) else {
-            Log.hotkey.error("CGEvent.tapCreate 失败 — 可能缺少辅助功能权限")
+            Log.hotkey.error("CGEvent.tapCreate 失败")
             throw HotkeyError.tapCreationFailed
         }
 
         self.eventTap = tap
 
         guard let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0) else {
-            Log.hotkey.error("创建 RunLoop source 失败")
             throw HotkeyError.tapCreationFailed
         }
 
         self.runLoopSource = source
 
         let thread = Thread {
-            let runLoop = CFRunLoopGetCurrent()
-            CFRunLoopAddSource(runLoop, source, .commonModes)
+            let rl = CFRunLoopGetCurrent()
+            CFRunLoopAddSource(rl, source, .commonModes)
             CGEvent.tapEnable(tap: tap, enable: true)
-            Log.hotkey.info("热键 tap 线程已启动")
+            Log.hotkey.info("热键 tap 线程启动")
             CFRunLoopRun()
         }
         thread.name = "com.voicetype.hotkey-tap"
@@ -104,7 +87,6 @@ final class HotkeyManager: @unchecked Sendable {
         Thread.sleep(forTimeInterval: 0.1)
 
         guard CGEvent.tapIsEnabled(tap: tap) else {
-            Log.hotkey.error("CGEvent tap 已创建但未启用 — 请检查辅助功能权限")
             throw HotkeyError.tapNotEnabled
         }
 
@@ -115,189 +97,133 @@ final class HotkeyManager: @unchecked Sendable {
 
     func unregister() {
         guard isRegistered else { return }
-        Log.hotkey.info("取消注册 CGEvent tap")
         stopWatchdog()
-
-        if let tap = eventTap {
-            CGEvent.tapEnable(tap: tap, enable: false)
-        }
-
-        if let source = runLoopSource, let thread = tapThread, thread.isExecuting {
-            CFRunLoopRemoveSource(CFRunLoopGetCurrent(), source, .commonModes)
+        if let tap = eventTap { CGEvent.tapEnable(tap: tap, enable: false) }
+        if let s = runLoopSource, let t = tapThread, t.isExecuting {
+            CFRunLoopRemoveSource(CFRunLoopGetCurrent(), s, .commonModes)
             CFRunLoopStop(CFRunLoopGetCurrent())
         }
-
-        eventTap = nil
-        runLoopSource = nil
-        tapThread = nil
-        isRegistered = false
-        isDictationKeyDown = false
-        correctionFiredInCurrentCycle = false
-        Log.hotkey.info("HotkeyManager 已取消注册")
+        eventTap = nil; runLoopSource = nil; tapThread = nil
+        isRegistered = false; isFnDown = false; correctionFired = false
     }
 
-    // MARK: - C 回调桥接
+    // MARK: - C 回调
 
-    private static let eventTapCallback: CGEventTapCallBack = { (proxy, type, event, userInfo) in
-        guard let userInfo = userInfo else {
-            return Unmanaged.passUnretained(event)
-        }
-        let manager = Unmanaged<HotkeyManager>.fromOpaque(userInfo).takeUnretainedValue()
-        return manager.handleCGEvent(proxy: proxy, type: type, event: event)
+    private static let callback: CGEventTapCallBack = { (_, type, event, userInfo) in
+        guard let ptr = userInfo else { return Unmanaged.passUnretained(event) }
+        let m = Unmanaged<HotkeyManager>.fromOpaque(ptr).takeUnretainedValue()
+        return m.dispatch(type: type, event: event)
     }
 
     // MARK: - 事件分发
 
-    /// 返回 nil 表示吞掉事件（热键已匹配），返回 event 表示透传。
-    private func handleCGEvent(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
+    private func dispatch(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
         lastEventTimestamp = Date()
 
         switch type {
-        case .keyDown:
-            if handleKeyEvent(event: event, isKeyDown: true) {
-                return nil  // 热键已消费，不传递给前台应用
-            }
-
-        case .keyUp:
-            if handleKeyEvent(event: event, isKeyDown: false) {
-                return nil
-            }
+        case .keyDown, .keyUp:
+            if handleKey(event: event, down: type == .keyDown) { return nil }
 
         case .flagsChanged:
-            handleFlagsChanged(event: event)
+            if handleFn(event: event) { return nil }
 
         case .tapDisabledByTimeout, .tapDisabledByUserInput:
-            let reason = type == .tapDisabledByTimeout ? "超时" : "用户输入"
-            Log.hotkey.warning("Event tap 被 \(reason) 禁用 — 尝试恢复")
             if let tap = eventTap {
                 CGEvent.tapEnable(tap: tap, enable: true)
-                if CGEvent.tapIsEnabled(tap: tap) {
-                    Log.hotkey.info("Event tap 已恢复")
-                } else {
-                    Log.hotkey.error("Event tap 恢复失败")
+                if !CGEvent.tapIsEnabled(tap: tap), !watchdogWarned {
+                    watchdogWarned = true
                     DispatchQueue.main.async {
                         NotificationCenter.default.post(name: .hotkeyTapDisabled, object: nil)
                     }
                 }
             }
 
-        default:
-            break
+        default: break
         }
 
         return Unmanaged.passUnretained(event)
     }
 
-    // MARK: - 按键处理
+    // MARK: - Fn 检测（flagsChanged）
 
-    /// 返回 true 表示事件已消费（热键匹配），应吞掉不传递。
-    @discardableResult
-    private func handleKeyEvent(event: CGEvent, isKeyDown: Bool) -> Bool {
-        let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
-        let flags = event.flags
+    /// Fn 键只发 flagsChanged——检测 .maskSecondaryFn 标志的变化。
+    private func handleFn(event: CGEvent) -> Bool {
+        let nowDown = event.flags.contains(.maskSecondaryFn)
 
-        // 听写: ⌥+空格 (hold-to-talk)
-        if keyCode == dictationKeyCode, flags.contains(.maskAlternate) {
-            if isKeyDown && !isDictationKeyDown {
-                isDictationKeyDown = true
-                Log.hotkey.info("听写热键按下: ⌥+空格")
-                DispatchQueue.main.async { [weak self] in
-                    self?.coordinator?.onDictationKeyDown?()
-                    self?.onDictationKeyDown?()
-                }
-                return true
-            } else if !isKeyDown && isDictationKeyDown {
-                isDictationKeyDown = false
-                Log.hotkey.info("听写热键释放")
-                DispatchQueue.main.async { [weak self] in
-                    self?.coordinator?.onDictationKeyUp?()
-                    self?.onDictationKeyUp?()
-                }
-                return true
+        if nowDown && !isFnDown {
+            isFnDown = true
+            Log.hotkey.info("Fn 按下——开始听写")
+            DispatchQueue.main.async { [weak self] in
+                self?.onDictationKeyDown?()
+                self?.coordinator?.onDictationKeyDown?()
             }
-        }
-
-        // 纠错: Ctrl+Shift+C (press-to-trigger)
-        if keyCode == correctionKeyCode {
-            if isKeyDown,
-               flags.contains(.maskControl),
-               flags.contains(.maskShift),
-               !correctionFiredInCurrentCycle {
-                correctionFiredInCurrentCycle = true
-                Log.hotkey.info("纠错热键触发: ⌃⇧C")
-                DispatchQueue.main.async { [weak self] in
-                    self?.coordinator?.onCorrectionKeyPress?()
-                    self?.onCorrectionKeyPress?()
-                }
-                return true
+            return true
+        } else if !nowDown && isFnDown {
+            isFnDown = false
+            Log.hotkey.info("Fn 释放——结束听写")
+            DispatchQueue.main.async { [weak self] in
+                self?.onDictationKeyUp?()
+                self?.coordinator?.onDictationKeyUp?()
             }
-            if !isKeyDown {
-                correctionFiredInCurrentCycle = false
-            }
+            return true
         }
 
         return false
     }
 
-    /// 跟踪 Option 键——如果用户在松开空格前先松了 Option，视为听写结束。
-    private func handleFlagsChanged(event: CGEvent) {
-        if isDictationKeyDown && !event.flags.contains(.maskAlternate) {
-            isDictationKeyDown = false
-            Log.hotkey.info("听写结束: Option 提前释放")
-            DispatchQueue.main.async { [weak self] in
-                self?.coordinator?.onDictationKeyUp?()
-                self?.onDictationKeyUp?()
+    // MARK: - 纠错热键 Ctrl+Shift+C
+
+    private func handleKey(event: CGEvent, down: Bool) -> Bool {
+        let code = event.getIntegerValueField(.keyboardEventKeycode)
+        let flags = event.flags
+
+        if code == correctionKeyCode {
+            if down, flags.contains(.maskControl), flags.contains(.maskShift), !correctionFired {
+                correctionFired = true
+                Log.hotkey.info("纠错热键: ⌃⇧C")
+                DispatchQueue.main.async { [weak self] in
+                    self?.onCorrectionKeyPress?()
+                    self?.coordinator?.onCorrectionKeyPress?()
+                }
+                return true
             }
+            if !down { correctionFired = false }
         }
+
+        return false
     }
 
     // MARK: - Watchdog
 
     func startWatchdog(interval: TimeInterval = 5.0) {
         guard isRegistered else { return }
-        Log.hotkey.info("启动 watchdog（间隔 \(interval) 秒）")
-
         let timer = DispatchSource.makeTimerSource(queue: .global(qos: .utility))
         timer.schedule(deadline: .now() + interval, repeating: interval)
-        timer.setEventHandler { [weak self] in
-            self?.performWatchdogCheck()
-        }
+        timer.setEventHandler { [weak self] in self?.check() }
         timer.resume()
         self.watchdogTimer = timer
     }
 
-    func stopWatchdog() {
-        watchdogTimer?.cancel()
-        watchdogTimer = nil
-    }
+    func stopWatchdog() { watchdogTimer?.cancel(); watchdogTimer = nil }
 
-    private func performWatchdogCheck() {
+    private func check() {
         guard let tap = eventTap else { return }
+        let ok = CGEvent.tapIsEnabled(tap: tap)
+        let idle = Date().timeIntervalSince(lastEventTimestamp)
 
-        let tapEnabled = CGEvent.tapIsEnabled(tap: tap)
-        let timeSinceLastEvent = Date().timeIntervalSince(lastEventTimestamp)
-
-        if !tapEnabled {
+        if !ok {
             CGEvent.tapEnable(tap: tap, enable: true)
             Thread.sleep(forTimeInterval: 0.1)
             if CGEvent.tapIsEnabled(tap: tap) {
-                Log.hotkey.info("Watchdog: tap 已恢复")
-                lastEventTimestamp = Date()
-                watchdogAlreadyWarned = false
-            } else if !watchdogAlreadyWarned {
-                Log.hotkey.error("Watchdog: 恢复失败")
-                DispatchQueue.main.async {
-                    NotificationCenter.default.post(name: .hotkeyTapDisabled, object: nil)
-                }
-                watchdogAlreadyWarned = true
+                lastEventTimestamp = Date(); watchdogWarned = false
+            } else if !watchdogWarned {
+                watchdogWarned = true
+                DispatchQueue.main.async { NotificationCenter.default.post(name: .hotkeyTapDisabled, object: nil) }
             }
-        } else if timeSinceLastEvent > 30 && !watchdogAlreadyWarned {
-            Log.hotkey.warning("Watchdog: \(Int(timeSinceLastEvent)) 秒无事件")
+        } else if idle > 30 && !watchdogWarned {
             CGEvent.tapEnable(tap: tap, enable: true)
-            DispatchQueue.main.async {
-                NotificationCenter.default.post(name: .hotkeyTapDisabled, object: nil)
-            }
-            watchdogAlreadyWarned = true
+            watchdogWarned = true
+            DispatchQueue.main.async { NotificationCenter.default.post(name: .hotkeyTapDisabled, object: nil) }
         }
     }
 }
