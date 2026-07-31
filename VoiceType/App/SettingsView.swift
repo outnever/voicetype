@@ -1,60 +1,53 @@
 import SwiftUI
 
-/// VoiceType settings window with API key configuration, hotkey display, and model info.
+/// VoiceType 偏好设置窗口。
 ///
-/// D-02: Standalone settings window opened from menu bar "Open Settings..." or App menu.
-/// T-01-02: API keys use SecureField with .textContentType(.password) to prevent
-/// autocorrect/autocapitalization. Displayed values are obfuscated (•••• + last 4 chars).
-/// D-12 / T-01-01: API keys are stored exclusively in Keychain — never UserDefaults.
+/// D-02: 独立设置窗口，从菜单栏"偏好设置…"或系统菜单打开。
+/// D-12: API 密钥只在 Keychain 存储，绝不落 UserDefaults。
 struct SettingsView: View {
     @EnvironmentObject var coordinator: AppCoordinator
-
-    /// Local settings store for preference bindings and Keychain access.
     @StateObject private var settingsStore = SettingsStore()
 
     var body: some View {
         TabView {
             generalTab
                 .tabItem {
-                    Label("General", systemImage: "gearshape")
+                    Label("通用", systemImage: "gearshape")
                 }
 
             apiKeysTab
                 .tabItem {
-                    Label("API Keys", systemImage: "key.fill")
+                    Label("API 密钥", systemImage: "key.fill")
                 }
 
             aboutTab
                 .tabItem {
-                    Label("About", systemImage: "info.circle")
+                    Label("关于", systemImage: "info.circle")
                 }
         }
-        .frame(width: 520, height: 420)
+        .frame(width: 540, height: 460)
     }
 
-    // MARK: - General Tab
+    // MARK: - 通用标签
 
     private var generalTab: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                // Hotkey configuration (read-only in v1)
                 hotkeySection
 
                 Divider()
 
-                // Whisper model selection (placeholder for Phase 2)
                 modelSection
 
                 Divider()
 
-                // Language preference (placeholder for Phase 2)
                 languageSection
             }
             .padding(24)
         }
     }
 
-    // MARK: - API Keys Tab
+    // MARK: - API 密钥标签
 
     private var apiKeysTab: some View {
         ScrollView {
@@ -63,29 +56,92 @@ struct SettingsView: View {
 
                 Divider()
 
-                // OpenAI API key
+                // OpenAI
                 apiKeySection(
                     provider: "openai",
-                    label: "OpenAI API Key",
+                    label: "OpenAI (GPT-4o)",
                     placeholder: "sk-...",
-                    description: "用于 GPT-4o 纠错功能。Key 仅存储在 macOS 钥匙串中，不会上传或明文保存。"
+                    description: "OpenAI 官方 API。需要 OpenAI 账号并在 platform.openai.com 创建 API Key。"
                 )
 
                 Divider()
 
-                // Claude API key
+                // Claude
                 apiKeySection(
                     provider: "claude",
-                    label: "Claude API Key",
+                    label: "Claude (Anthropic)",
                     placeholder: "sk-ant-...",
-                    description: "用于 Claude 纠错功能（备选后端）。Key 仅存储在 macOS 钥匙串中。"
+                    description: "Anthropic 官方 API。需要 Anthropic 账号并在 console.anthropic.com 创建 API Key。"
                 )
+
+                Divider()
+
+                // OpenRouter
+                apiKeySection(
+                    provider: "openrouter",
+                    label: "OpenRouter（中转聚合）",
+                    placeholder: "sk-or-v1-...",
+                    description: "OpenRouter 聚合了数十种大模型，包括 DeepSeek、Gemini、Qwen 等。按用量付费，无需单独注册各厂商。在 openrouter.ai 创建 API Key。"
+                )
+
+                Divider()
+
+                // DeepSeek
+                apiKeySection(
+                    provider: "deepseek",
+                    label: "DeepSeek",
+                    placeholder: "sk-...",
+                    description: "国产大模型，兼容 OpenAI API 格式。在 platform.deepseek.com 创建 API Key。"
+                )
+
+                Divider()
+
+                // Custom Endpoint
+                customEndpointSection
             }
             .padding(24)
         }
     }
 
-    // MARK: - About Tab
+    // MARK: - 自定义端点
+
+    private var customEndpointSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("自定义端点")
+                .font(.headline)
+
+            Text("兼容 OpenAI API 格式的任何服务（如 Ollama、LM Studio、vLLM 等本地模型）。填入 API 地址即可。")
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            // Endpoint URL
+            VStack(alignment: .leading, spacing: 4) {
+                Text("API 地址")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+
+                TextField("https://localhost:11434/v1", text: $customEndpointURL)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(.body, design: .monospaced))
+            }
+
+            // API Key (optional for local)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("API Key（本地模型可留空）")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+
+                if settingsStore.hasAPIKey(for: "custom") {
+                    savedKeyView(provider: "custom")
+                } else {
+                    newKeyInputView(provider: "custom", placeholder: "ollama 等本地模型可留空")
+                }
+            }
+        }
+    }
+
+    // MARK: - 关于标签
 
     private var aboutTab: some View {
         VStack(spacing: 16) {
@@ -99,11 +155,11 @@ struct SettingsView: View {
                 .font(.title)
                 .fontWeight(.bold)
 
-            Text("Version 1.0")
+            Text("版本 1.0")
                 .font(.subheadline)
                 .foregroundColor(.secondary)
 
-            Text("macOS system-level voice dictation with AI correction.")
+            Text("macOS 系统级语音输入与 AI 纠错工具。\n按住热键说话即可输入，说错了再按一下说句人话就能改回来。")
                 .font(.body)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
@@ -111,7 +167,7 @@ struct SettingsView: View {
 
             Spacer()
 
-            Text("Built with WhisperKit + GPT-4o / Claude")
+            Text("基于 WhisperKit + AI 大模型")
                 .font(.caption)
                 .foregroundColor(.secondary)
 
@@ -120,16 +176,16 @@ struct SettingsView: View {
         .padding(24)
     }
 
-    // MARK: - Hotkey Section
+    // MARK: - 快捷键区
 
     private var hotkeySection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Hotkeys")
+            Text("快捷键")
                 .font(.headline)
 
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Dictation")
+                    Text("听写")
                         .font(.subheadline)
                         .fontWeight(.medium)
                     Text(settingsStore.dictationKeyDisplay)
@@ -150,7 +206,7 @@ struct SettingsView: View {
 
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Correction")
+                    Text("纠错")
                         .font(.subheadline)
                         .fontWeight(.medium)
                     Text(settingsStore.correctionKeyDisplay)
@@ -171,11 +227,11 @@ struct SettingsView: View {
         }
     }
 
-    // MARK: - Model Section
+    // MARK: - 模型区
 
     private var modelSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Whisper Model")
+            Text("Whisper 模型")
                 .font(.headline)
 
             HStack {
@@ -194,21 +250,21 @@ struct SettingsView: View {
                     .cornerRadius(4)
             }
 
-            Text("Model selection and download will be available in the next update.")
+            Text("模型选择和下载将在下个版本中开放。")
                 .font(.caption)
                 .foregroundColor(.secondary)
         }
     }
 
-    // MARK: - Language Section
+    // MARK: - 语言区
 
     private var languageSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Language")
+            Text("语言")
                 .font(.headline)
 
             HStack {
-                Text(settingsStore.dictationLanguage == "auto" ? "Auto-detect" : settingsStore.dictationLanguage)
+                Text(settingsStore.dictationLanguage == "auto" ? "自动检测" : settingsStore.dictationLanguage)
                     .font(.body)
                     .foregroundColor(.secondary)
 
@@ -225,9 +281,8 @@ struct SettingsView: View {
         }
     }
 
-    // MARK: - API Key Section (Reusable)
+    // MARK: - API Key 区（复用）
 
-    /// Reusable component for individual API key configuration.
     @ViewBuilder
     private func apiKeySection(
         provider: String,
@@ -244,7 +299,6 @@ struct SettingsView: View {
                 .foregroundColor(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            // Show saved key status or input field
             if settingsStore.hasAPIKey(for: provider) {
                 savedKeyView(provider: provider)
             } else {
@@ -253,25 +307,21 @@ struct SettingsView: View {
         }
     }
 
-    /// View shown when an API key is already stored for the provider.
     @ViewBuilder
     private func savedKeyView(provider: String) -> some View {
         HStack(spacing: 8) {
-            // Obfuscated display: •••• + last 4 chars
             Text(settingsStore.apiKeyDisplayString(for: provider))
                 .font(.system(.body, design: .monospaced))
                 .foregroundColor(.secondary)
 
             Spacer()
 
-            // Clear button — removes the key from Keychain
-            Button("Clear") {
+            Button("清除") {
                 clearAPIKey(provider: provider)
             }
             .buttonStyle(.borderless)
             .foregroundColor(.red)
 
-            // Saved indicator
             Image(systemName: "checkmark.circle.fill")
                 .foregroundColor(.green)
                 .font(.caption)
@@ -281,20 +331,17 @@ struct SettingsView: View {
         .cornerRadius(8)
     }
 
-    /// View shown when no API key exists — SecureField for input + Save button.
     @ViewBuilder
     private func newKeyInputView(provider: String, placeholder: String) -> some View {
         VStack(spacing: 8) {
             HStack(spacing: 8) {
-                // T-01-02: SecureField with .textContentType(.password) prevents
-                // autocorrect, autocapitalization, and keyboard suggestions.
                 SecureField(placeholder, text: keyBinding(for: provider))
                     .textFieldStyle(.roundedBorder)
                     .textContentType(.password)
                     .disableAutocorrection(true)
                     .font(.system(.body, design: .monospaced))
 
-                Button("Save") {
+                Button("保存") {
                     saveAPIKey(provider: provider)
                 }
                 .buttonStyle(.borderedProminent)
@@ -303,61 +350,66 @@ struct SettingsView: View {
         }
     }
 
-    // MARK: - API Key State Management
+    // MARK: - 密钥状态管理
 
-    /// Per-provider state for the SecureField text binding.
-    /// We use @State dictionaries since providers are known at compile time.
     @State private var openaiKeyText: String = ""
     @State private var claudeKeyText: String = ""
+    @State private var openrouterKeyText: String = ""
+    @State private var deepseekKeyText: String = ""
+    @State private var customKeyText: String = ""
+    @State private var customEndpointURL: String = ""
 
-    /// Return a binding to the correct per-provider key text.
     private func keyBinding(for provider: String) -> Binding<String> {
         switch provider {
         case "openai": return $openaiKeyText
         case "claude": return $claudeKeyText
+        case "openrouter": return $openrouterKeyText
+        case "deepseek": return $deepseekKeyText
+        case "custom": return $customKeyText
         default: return .constant("")
         }
     }
 
-    /// Return the current text value for the given provider.
     private func keyText(for provider: String) -> String {
         switch provider {
         case "openai": return openaiKeyText
         case "claude": return claudeKeyText
+        case "openrouter": return openrouterKeyText
+        case "deepseek": return deepseekKeyText
+        case "custom": return customKeyText
         default: return ""
         }
     }
 
-    /// Save the entered API key to Keychain and clear the input field.
     private func saveAPIKey(provider: String) {
         let text = keyText(for: provider)
         guard !text.isEmpty else { return }
 
         do {
             try settingsStore.saveAPIKey(provider: provider, key: text)
-            // Clear input on success
             switch provider {
             case "openai": openaiKeyText = ""
             case "claude": claudeKeyText = ""
+            case "openrouter": openrouterKeyText = ""
+            case "deepseek": deepseekKeyText = ""
+            case "custom": customKeyText = ""
             default: break
             }
         } catch {
-            Log.settings.error("Failed to save API key for \(provider): \(error.localizedDescription)")
+            Log.settings.error("保存 API Key 失败 (\(provider)): \(error.localizedDescription)")
         }
     }
 
-    /// Delete the API key from Keychain for the given provider.
     private func clearAPIKey(provider: String) {
         do {
             try settingsStore.deleteAPIKey(for: provider)
         } catch {
-            Log.settings.error("Failed to delete API key for \(provider): \(error.localizedDescription)")
+            Log.settings.error("删除 API Key 失败 (\(provider)): \(error.localizedDescription)")
         }
     }
 
-    // MARK: - Notice
+    // MARK: - 提示
 
-    /// Security notice displayed at the top of the API Keys tab.
     private var apiKeyNotice: some View {
         HStack(spacing: 8) {
             Image(systemName: "lock.shield.fill")
@@ -365,10 +417,10 @@ struct SettingsView: View {
                 .font(.title3)
 
             VStack(alignment: .leading, spacing: 4) {
-                Text("Secure Storage")
+                Text("安全存储")
                     .font(.subheadline)
                     .fontWeight(.semibold)
-                Text("API keys are stored exclusively in the macOS Keychain and are never saved to disk in plain text.")
+                Text("API 密钥仅存储在 macOS 钥匙串中，绝不以明文落盘。填写上方任一供应商的密钥即可使用纠错功能。")
                     .font(.caption)
                     .foregroundColor(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

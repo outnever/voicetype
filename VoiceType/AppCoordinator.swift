@@ -19,10 +19,10 @@ final class AppCoordinator: ObservableObject {
     @Published var iconName: String = "mic.fill"
 
     /// Human-readable status message for menu bar display
-    @Published var statusMessage: String = "Ready"
+    @Published var statusMessage: String = "就绪"
 
     /// Current audio input device name — updated via device change notifications.
-    @Published var currentInputDevice: String = "Unknown"
+    @Published var currentInputDevice: String = "未知"
 
     /// Whether the hotkey CGEvent tap is currently active and healthy.
     /// Set to true on successful registration, false on watchdog-detected failure.
@@ -121,7 +121,7 @@ final class AppCoordinator: ObservableObject {
         ) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
-                self.statusMessage = "Warning: Mic may not be working"
+                self.statusMessage = "警告：麦克风可能未工作"
                 Log.app.warning("Audio silence detected — mic may not be capturing")
             }
         }
@@ -140,7 +140,7 @@ final class AppCoordinator: ObservableObject {
             guard let self else { return }
             Log.app.info("Dictation hotkey pressed — transitioning to .recording")
             self.state = .recording
-            self.statusMessage = "Recording..."
+            self.statusMessage = "录音中…"
         }
 
         hotkeyManager.onDictationKeyUp = { [weak self] in
@@ -148,7 +148,7 @@ final class AppCoordinator: ObservableObject {
             Log.app.info("Dictation hotkey released — transitioning to .idle")
             // Phase 2: audio capture stop + transcription will be inserted here
             self.state = .idle
-            self.statusMessage = "Ready"
+            self.statusMessage = "就绪"
         }
 
         // Correction: Ctrl+Shift+C press-to-trigger (D-04)
@@ -157,12 +157,12 @@ final class AppCoordinator: ObservableObject {
             Log.app.info("Correction hotkey pressed — transitioning to .correcting")
             // Phase 3: AI correction pipeline will be inserted here
             self.state = .correcting
-            self.statusMessage = "Correcting..."
+            self.statusMessage = "纠错中…"
             // Auto-reset after a short delay (placeholder until Phase 3 implementation)
             DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
                 if self?.state == .correcting {
                     self?.state = .idle
-                    self?.statusMessage = "Ready"
+                    self?.statusMessage = "就绪"
                 }
             }
         }
@@ -183,7 +183,7 @@ final class AppCoordinator: ObservableObject {
                 guard let self else { return }
                 Log.app.warning("Hotkey tap disabled — updating UI to warn user")
                 self.hotkeyTapActive = false
-                self.statusMessage = "Hotkey permission lost — re-grant in System Settings → Privacy → Accessibility"
+                self.statusMessage = "热键权限已丢失——请在系统设置 → 隐私与安全性 → 辅助功能中重新授权"
             }
         }
 
@@ -213,7 +213,7 @@ final class AppCoordinator: ObservableObject {
 
             // If all permissions are already granted, we're ready
             if self?.permissionManager.allPermissionsGranted == true {
-                self?.statusMessage = "Ready"
+                self?.statusMessage = "就绪"
                 Log.app.info("All permissions granted — VoiceType ready")
 
                 // Register global hotkeys now that permissions are confirmed.
@@ -230,7 +230,7 @@ final class AppCoordinator: ObservableObject {
                     self?.hotkeyTapActive = false
                 }
             } else {
-                self?.statusMessage = "Permissions needed"
+                self?.statusMessage = "需要授权"
                 Log.app.info("Some permissions missing — user needs to complete setup")
             }
         }
@@ -248,7 +248,7 @@ final class AppCoordinator: ObservableObject {
     func startAudioCapture() throws {
         Log.app.info("AppCoordinator: starting audio capture")
         try audioCapture.start()
-        statusMessage = "Recording..."
+        statusMessage = "录音中…"
     }
 
     /// Stops audio capture and resets the ring buffer.
@@ -258,6 +258,6 @@ final class AppCoordinator: ObservableObject {
     func stopAudioCapture() {
         Log.app.info("AppCoordinator: stopping audio capture")
         audioCapture.stop()
-        statusMessage = "Ready"
+        statusMessage = "就绪"
     }
 }

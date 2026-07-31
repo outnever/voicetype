@@ -28,7 +28,7 @@ struct VoiceTypeApp: App {
         // D-07: Permission onboarding window — renders only when permissions are missing
         // and user has not chosen to skip. The AppDelegate brings this window to front
         // on first launch.
-        Window("Welcome to VoiceType", id: "permission-gate") {
+        Window("欢迎使用 VoiceType", id: "permission-gate") {
             PermissionGateView()
                 .environmentObject(coordinator)
         }
@@ -40,7 +40,7 @@ struct VoiceTypeApp: App {
         // LSUIElement apps (menu bar only, no Dock icon) cannot reliably trigger
         // the Settings scene via NSApp.sendAction(showSettingsWindow:).
         // The MenuBarView opens this via openSettings environment action.
-        Window("Settings", id: "settings") {
+        Window("偏好设置", id: "settings") {
             SettingsView()
                 .environmentObject(coordinator)
         }
@@ -72,7 +72,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // Find and bring the permission gate window to front.
             // Fallback: if the window isn't found (race condition), it can also
             // be opened from the MenuBarView dropdown.
-            for window in NSApp.windows where window.title.contains("Welcome") {
+            for window in NSApp.windows where window.title.contains("欢迎") {
                 window.makeKeyAndOrderFront(nil)
                 Log.app.info("Permission gate window activated")
                 break

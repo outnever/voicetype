@@ -1,36 +1,25 @@
 import SwiftUI
 import ApplicationServices
 
-/// First-run permission onboarding flow displayed as an overlay window when
-/// the user launches VoiceType for the first time.
+/// 首次启动时的权限引导窗口。
 ///
-/// D-07 sequential flow:
-///   1. Microphone: explain why, request via TCC dialog → user grants
-///   2. Accessibility: explain why, open System Settings → poll until granted
+/// D-07 顺序引导:
+///   1. 麦克风: 说明原因 → 请求 TCC 弹窗 → 用户授予
+///   2. 辅助功能: 说明原因 → 打开系统设置 → 轮询直到用户授予
 ///
-/// Once both permissions are granted, the gate view dismisses itself.
+/// 两个权限都获取后，引导窗口自动消失。
 struct PermissionGateView: View {
     @EnvironmentObject var coordinator: AppCoordinator
 
-    /// Current onboarding step (microphone first, then accessibility)
     @State private var currentStep: PermissionStep = .microphone
-
-    /// Tracks whether the user has chosen to skip setup
     @State private var hasSkipped: Bool = false
-
-    /// Tracks whether a permission request is in-flight
     @State private var isRequesting: Bool = false
 
     var body: some View {
         if !hasSkipped && !coordinator.permissionManager.allPermissionsGranted {
             VStack(spacing: 24) {
-                // App icon and title
                 headerSection
-
-                // Step-specific content
                 stepContent
-
-                // Action buttons
                 actionButtons
             }
             .padding(32)
@@ -41,7 +30,7 @@ struct PermissionGateView: View {
         }
     }
 
-    // MARK: - Header
+    // MARK: - 头部
 
     private var headerSection: some View {
         VStack(spacing: 8) {
@@ -49,26 +38,25 @@ struct PermissionGateView: View {
                 .font(.system(size: 48))
                 .foregroundColor(.accentColor)
 
-            Text("Welcome to VoiceType")
+            Text("欢迎使用 VoiceType")
                 .font(.title2)
                 .fontWeight(.semibold)
 
-            Text("Let's set up the permissions needed for voice dictation.")
+            Text("请先完成以下权限设置，然后就可以开始语音输入了。")
                 .font(.subheadline)
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
         }
     }
 
-    // MARK: - Step Content
+    // MARK: - 步骤内容
 
     @ViewBuilder
     private var stepContent: some View {
         VStack(alignment: .leading, spacing: 12) {
-            // Progress indicator
             HStack(spacing: 8) {
                 StepIndicator(number: 1, isActive: currentStep == .microphone, isCompleted: coordinator.permissionManager.microphoneGranted)
-                Text("Microphone")
+                Text("麦克风")
                     .font(.caption)
                     .foregroundColor(currentStep == .microphone ? .primary : .secondary)
 
@@ -77,14 +65,13 @@ struct PermissionGateView: View {
                     .frame(height: 1)
 
                 StepIndicator(number: 2, isActive: currentStep == .accessibility, isCompleted: coordinator.permissionManager.accessibilityGranted)
-                Text("Accessibility")
+                Text("辅助功能")
                     .font(.caption)
                     .foregroundColor(currentStep == .accessibility ? .primary : .secondary)
             }
 
             Divider()
 
-            // Explanation text
             explanationText
                 .font(.body)
                 .foregroundColor(.primary)
@@ -96,26 +83,24 @@ struct PermissionGateView: View {
     private var explanationText: some View {
         switch currentStep {
         case .microphone:
-            Text("VoiceType 需要用麦克风将你说的转化成文字。录音仅在按住听写键时进行，数据不会上传或存储。")
+            Text("VoiceType 需要用麦克风将你说的话转成文字。录音仅在按住听写键时进行，数据不会上传或存储。")
         case .accessibility:
-            Text("VoiceType 需要辅助功能权限才能将文字输入到你正在用的应用中。这允许 VoiceType 将转录后的文字写入到你当前光标所在位置。")
+            Text("VoiceType 需要辅助功能权限才能将转写后的文字输入到你正在用的应用中，放在光标所在位置。")
         }
     }
 
-    // MARK: - Action Buttons
+    // MARK: - 操作按钮
 
     private var actionButtons: some View {
         HStack(spacing: 12) {
-            // Skip button — always available
-            Button("Skip for now") {
-                Log.permission.info("User chose to skip permission setup")
+            Button("跳过") {
+                Log.permission.info("用户选择跳过权限设置")
                 hasSkipped = true
             }
             .keyboardShortcut(.cancelAction)
 
             Spacer()
 
-            // Primary action button — context-dependent
             primaryButton
         }
     }
@@ -129,7 +114,7 @@ struct PermissionGateView: View {
                     ProgressView()
                         .controlSize(.small)
                 } else {
-                    Text("Grant Microphone Access")
+                    Text("授予麦克风权限")
                 }
             }
             .buttonStyle(.borderedProminent)
@@ -137,16 +122,14 @@ struct PermissionGateView: View {
 
         case .accessibility:
             Button(action: openAccessibilitySettings) {
-                Text("Open System Settings")
+                Text("打开系统设置")
             }
             .buttonStyle(.borderedProminent)
         }
     }
 
-    // MARK: - Actions
+    // MARK: - 动作
 
-    /// Request microphone permission via TCC dialog.
-    /// On success, advance to the accessibility step.
     private func requestMicrophone() {
         isRequesting = true
         Task {
@@ -154,7 +137,7 @@ struct PermissionGateView: View {
             isRequesting = false
 
             if granted {
-                Log.permission.info("Microphone permission granted — advancing to accessibility step")
+                Log.permission.info("麦克风权限已授予 → 进入辅助功能步骤")
                 withAnimation {
                     currentStep = .accessibility
                 }
@@ -162,31 +145,26 @@ struct PermissionGateView: View {
         }
     }
 
-    /// Open System Settings > Privacy & Security > Accessibility.
-    /// Start polling for the permission change since there's no callback.
     private func openAccessibilitySettings() {
-        Log.permission.info("Opening System Settings for accessibility permission")
+        Log.permission.info("正在打开系统设置中的辅助功能页面")
         let urlString = "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
         if let url = URL(string: urlString) {
             NSWorkspace.shared.open(url)
         }
 
-        // Start polling — the user needs to manually enable VoiceType in the list
         coordinator.permissionManager.startAccessibilityPolling()
     }
 }
 
-// MARK: - Permission Step Enum
+// MARK: - 权限步骤枚举
 
-/// Sequential steps in the first-run permission flow.
 private enum PermissionStep {
     case microphone
     case accessibility
 }
 
-// MARK: - Step Indicator
+// MARK: - 步骤指示器
 
-/// Circular step indicator for the progress bar in PermissionGateView.
 private struct StepIndicator: View {
     let number: Int
     let isActive: Bool

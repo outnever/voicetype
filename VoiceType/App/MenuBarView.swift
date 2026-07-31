@@ -1,31 +1,27 @@
 import SwiftUI
 
-/// Menu bar dropdown content displayed when the user clicks the VoiceType icon.
-/// Shows current application status, permission indicators, and quick actions.
+/// 菜单栏下拉内容，显示当前状态、权限指示和快捷操作。
 struct MenuBarView: View {
     @EnvironmentObject var coordinator: AppCoordinator
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            // Status section
             statusSection
 
             Divider()
 
-            // Permission status
             permissionSection
 
             Divider()
 
-            // Actions section
             actionsSection
         }
         .padding()
         .frame(minWidth: 220)
     }
 
-    // MARK: - Status Section
+    // MARK: - 状态区
 
     private var statusSection: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -44,37 +40,36 @@ struct MenuBarView: View {
         }
     }
 
-    // MARK: - Permission Section
+    // MARK: - 权限区
 
     private var permissionSection: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Permissions")
+            Text("权限状态")
                 .font(.caption)
                 .foregroundColor(.secondary)
                 .textCase(.uppercase)
 
             PermissionRow(
-                label: "Microphone",
+                label: "麦克风",
                 granted: coordinator.permissionManager.microphoneGranted
             )
 
             PermissionRow(
-                label: "Accessibility",
+                label: "辅助功能",
                 granted: coordinator.permissionManager.accessibilityGranted
             )
         }
     }
 
-    // MARK: - Actions Section
+    // MARK: - 操作区
 
     private var actionsSection: some View {
         VStack(spacing: 4) {
-            // Open permissions gate manually if permissions are missing
             if !coordinator.permissionManager.allPermissionsGranted {
                 Button(action: openPermissionGate) {
                     HStack {
                         Image(systemName: "lock.shield")
-                        Text("Open Permissions...")
+                        Text("完成权限设置…")
                         Spacer()
                     }
                 }
@@ -84,7 +79,7 @@ struct MenuBarView: View {
             Button(action: openSettings) {
                 HStack {
                     Image(systemName: "gearshape")
-                    Text("Open Settings...")
+                    Text("偏好设置…")
                     Spacer()
                 }
             }
@@ -95,7 +90,7 @@ struct MenuBarView: View {
             Button(action: quitApp) {
                 HStack {
                     Image(systemName: "power")
-                    Text("Quit VoiceType")
+                    Text("退出 VoiceType")
                     Spacer()
                 }
             }
@@ -103,9 +98,8 @@ struct MenuBarView: View {
         }
     }
 
-    // MARK: - Helpers
+    // MARK: - 辅助
 
-    /// D-08: Map permission status to a SwiftUI Color for the status indicator dot.
     private var statusColor: Color {
         switch coordinator.permissionStatus {
         case .allGranted:  return .green
@@ -114,36 +108,30 @@ struct MenuBarView: View {
         }
     }
 
-    /// Open the Settings window via the openWindow environment action.
-    /// Uses Window scene id "settings" defined in VoiceTypeApp.swift.
     private func openSettings() {
-        Log.app.info("Menu bar: Open Settings requested")
+        Log.app.info("菜单栏：打开偏好设置")
         openWindow(id: "settings")
         DispatchQueue.main.async {
             NSApp.activate(ignoringOtherApps: true)
         }
     }
 
-    /// Open the permission gate window so the user can grant permissions.
-    /// This is the manual fallback for when the auto-open on first launch fails.
     private func openPermissionGate() {
-        Log.app.info("Menu bar: Open Permissions requested")
+        Log.app.info("菜单栏：打开权限引导")
         openWindow(id: "permission-gate")
         DispatchQueue.main.async {
             NSApp.activate(ignoringOtherApps: true)
         }
     }
 
-    /// Gracefully terminate the application.
     private func quitApp() {
-        Log.app.info("Menu bar: Quit requested")
+        Log.app.info("菜单栏：退出")
         NSApplication.shared.terminate(nil)
     }
 }
 
-// MARK: - Permission Row
+// MARK: - 权限行
 
-/// Individual permission status indicator row in the menu bar dropdown.
 private struct PermissionRow: View {
     let label: String
     let granted: Bool
