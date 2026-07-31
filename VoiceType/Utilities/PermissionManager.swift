@@ -60,15 +60,16 @@ final class PermissionManager: ObservableObject {
 
     /// Check current accessibility permission status.
     /// Returns the result of AXIsProcessTrusted() — the single source of truth
-    /// for accessibility trust on macOS.
+    /// for accessibility trust on macOS. Only logs on state change to avoid spam.
     @discardableResult
     func checkAccessibilityPermission() -> Bool {
         let trusted = AXIsProcessTrusted()
+        let previous = accessibilityGranted
         accessibilityGranted = trusted
-        if trusted {
-            Log.permission.info("Accessibility permission granted")
-        } else {
-            Log.permission.warning("Accessibility permission not granted")
+        if trusted && !previous {
+            Log.permission.info("辅助功能权限已获取")
+        } else if !trusted && previous {
+            Log.permission.warning("辅助功能权限已丢失")
         }
         return trusted
     }
@@ -80,10 +81,14 @@ final class PermissionManager: ObservableObject {
     /// Call this after directing the user to System Settings > Privacy > Accessibility.
     func startAccessibilityPolling(interval: TimeInterval = 2.0) {
         pollingTimer?.invalidate()
-        Log.permission.info("Starting accessibility polling every \(interval)s")
+        Log.permission.info("开始轮询辅助功能权限（每 \(interval) 秒）")
         pollingTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                self?.checkAccessibilityPermission()
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.checkAccessibilityPermission()
+                if self.accessibilityGranted {
+                    self.stopAccessibilityPolling()
+                }
             }
         }
     }
@@ -92,7 +97,7 @@ final class PermissionManager: ObservableObject {
     func stopAccessibilityPolling() {
         pollingTimer?.invalidate()
         pollingTimer = nil
-        Log.permission.info("Accessibility polling stopped")
+        Log.permission.info("辅助功能轮询已停止")
     }
 
     // MARK: - Initial Status Check
@@ -103,11 +108,11 @@ final class PermissionManager: ObservableObject {
         // Microphone: check status synchronously (AVCaptureDevice.authorizationStatus is instant)
         let micStatus = AVCaptureDevice.authorizationStatus(for: .audio)
         microphoneGranted = (micStatus == .authorized)
-        Log.permission.info("Initial microphone status: \(micStatus.rawValue)")
+        Log.permission.info("初始麦克风状态: \(micStatus.rawValue)")
 
         // Accessibility: AXIsProcessTrusted() is also synchronous
         accessibilityGranted = AXIsProcessTrusted()
-        Log.permission.info("Initial accessibility status: \(accessibilityGranted ? "trusted" : "not trusted")")
+        Log.permission.info("初始辅助功能状态: \(accessibilityGranted ? "已授权" : "未授权")")
     }
 }
 
