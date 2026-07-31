@@ -45,13 +45,19 @@ final class ModelDownloadManager: ObservableObject {
 
     // MARK: - Initialization
 
-    /// Downloads and loads the WhisperKit model asynchronously.
+    /// 使用 HuggingFace 镜像下载模型（国内可直连，无需翻墙）。
+    /// hf-mirror.com 是 HuggingFace 官方认可的镜像站。
+    private static let hfMirrorURL = "https://hf-mirror.com"
+
+    /// 开发默认使用 tiny 模型（75MB）——下载快、够测试。
+    /// 生产环境切换为 "openai_whisper-large-v3-v20240930_626MB"。
+    private static let devModelName = "openai_whisper-tiny"
+
+    /// 下载并加载 WhisperKit 模型。
     ///
-    /// - Parameter modelName: The HuggingFace model identifier (e.g. "openai_whisper-large-v3-v20240930_626MB").
-    /// - Note: On first launch, this triggers a ~626MB download from HuggingFace.
-    ///   WhisperKit handles download progress and caching transparently.
-    /// - Note: Idempotent — calling again while already `.ready` or `.downloading` is a no-op.
-    func initialize(modelName: String = "openai_whisper-large-v3-v20240930_626MB") async {
+    /// - Parameter modelName: HuggingFace 模型标识。
+    /// - Note: 通过 HF_ENDPOINT 环境变量指向 hf-mirror.com，国内可直连。
+    func initialize(modelName: String = ModelDownloadManager.devModelName) async {
         // Guard against duplicate calls — if already downloading or ready, skip.
         switch modelState {
         case .ready, .downloading:
@@ -64,9 +70,9 @@ final class ModelDownloadManager: ObservableObject {
         Log.transcription.info("ModelDownloadManager: starting model initialization for \(modelName)")
         modelState = .loading("正在准备语音模型…")
 
-        // CRITICAL (D-04): All WhisperKit config/loading happens in Task.detached —
-        // never on @MainActor. The `modelState` published property allows UI
-        // to observe progress without blocking.
+        // 设置 HuggingFace 镜像端点，绕过网络限制（无需翻墙）
+        setenv("HF_ENDPOINT", ModelDownloadManager.hfMirrorURL, 1)
+
         do {
             let newPipe = try await Task.detached(priority: .userInitiated) {
                 Log.transcription.info("WhisperKit: initializing with model \(modelName)")
