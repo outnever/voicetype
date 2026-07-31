@@ -25,13 +25,13 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Core Dictation
 
-- [ ] **DICT-01**: User can hold dictation hotkey, speak, release, and transcribed text appears at cursor in any application
+- [x] **DICT-01**: User can hold dictation hotkey, speak, release, and transcribed text appears at cursor in any application
 - [ ] **DICT-02**: VAD (Voice Activity Detection) auto-detects when user stops speaking, no manual stop required
 - [x] **DICT-03**: Dictation works offline using local Whisper model (no internet required)
 - [x] **DICT-04**: Transcription output includes auto-punctuation and capitalization
 - [x] **DICT-05**: Filler words ("um", "uh", "you know") are removed from output
 - [x] **DICT-06**: Text insertion works across all target apps via AXUIElement with clipboard fallback
-- [ ] **DICT-07**: User sees a visual recording indicator (menu bar icon / HUD) during dictation
+- [x] **DICT-07**: User sees a visual recording indicator (menu bar icon / HUD) during dictation
 - [x] **DICT-08**: Basic word error rate (WER) below 10-15% for Chinese and English dictation
 
 ### AI Correction
@@ -47,8 +47,8 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### UX & Feedback
 
-- [ ] **UXFE-01**: User always sees current app state (idle / recording / transcribing / correcting) via menu bar icon
-- [ ] **UXFE-02**: Error states (audio failure, model load failure, permission loss) are surfaced to user with recovery guidance
+- [x] **UXFE-01**: User always sees current app state (idle / recording / transcribing / correcting) via menu bar icon
+- [x] **UXFE-02**: Error states (audio failure, model load failure, permission loss) are surfaced to user with recovery guidance
 - [x] **UXFE-03**: Bilingual Chinese + English dictation and correction supported out of the box
 
 ## v2 Requirements
@@ -102,13 +102,13 @@ Which phases cover which requirements. Updated during roadmap creation.
 | HOTK-04 | Phase 1 | Complete |
 | AUDI-01 | Phase 1 | Complete |
 | AUDI-02 | Phase 1 | Complete |
-| DICT-01 | Phase 2 | Pending |
+| DICT-01 | Phase 2 | Complete |
 | DICT-02 | Phase 2 | Pending |
 | DICT-03 | Phase 2 | Pending |
 | DICT-04 | Phase 2 | Pending |
 | DICT-05 | Phase 2 | Pending |
 | DICT-06 | Phase 2 | Complete |
-| DICT-07 | Phase 2 | Pending |
+| DICT-07 | Phase 2 | Complete |
 | DICT-08 | Phase 2 | Pending |
 | CORR-01 | Phase 3 | Pending |
 | CORR-02 | Phase 3 | Pending |
@@ -118,8 +118,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CORR-06 | Phase 3 | Pending |
 | CORR-07 | Phase 3 | Pending |
 | CORR-08 | Phase 3 | Pending |
-| UXFE-01 | Phase 2 | Pending |
-| UXFE-02 | Phase 2 | Pending |
+| UXFE-01 | Phase 2 | Complete |
+| UXFE-02 | Phase 2 | Complete |
 | UXFE-03 | Phase 2 | Pending |
 
 **Coverage:**

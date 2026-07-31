@@ -7,7 +7,7 @@ VoiceType 从零开始构建——一个 macOS 系统级语音输入与 AI 纠�
 ## Phases
 
 - [x] **Phase 1: Foundation** - 应用框架、权限流程、全局热键、音频采集全部就绪 (completed 2026-07-30)
-- [ ] **Phase 2: Core Dictation** - 按住热键说话，松手后语音转文字输入到任意应用
+- [x] **Phase 2: Core Dictation** - 按住热键说话，松手后语音转文字输入到任意应用 (completed 2026-07-31)
 - [ ] **Phase 3: AI Correction** - 按纠错键说出自然语言指令，AI 原地修正错误文字
 
 ## Phase Details
@@ -50,13 +50,13 @@ Plans:
   4. 发生错误时（麦克风故障、模型未加载、权限丢失），应用显示具体错误原因并给出修复指引
   5. 中英文双语听写均支持，基础词错率（WER）低于 15%
 
-**Plans**: 2/3 plans executed
+**Plans**: 3/3 plans complete
 
 Plans:
 
 - [x] 02-01-PLAN.md — WhisperKit Integration: ModelDownloadManager + TranscriptionService (VAD, punctuation, filler removal, bilingual)
 - [x] 02-02-PLAN.md — Text I/O: AccessibilityBridge primary + ClipboardBridge fallback with save/restore
-- [ ] 02-03-PLAN.md — Dictation Flow + HUD: wire pipeline into AppCoordinator, recording overlay, menu bar state
+- [x] 02-03-PLAN.md — Dictation Flow + HUD: wire pipeline into AppCoordinator, recording overlay, menu bar state
 
 **UI hint**: yes
 
@@ -84,5 +84,5 @@ Phases execute in numeric order: 1 → 2 → 3
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Foundation | 3/3 | Complete   | 2026-07-30 |
-| 2. Core Dictation | 2/3 | In Progress|  |
+| 2. Core Dictation | 3/3 | Complete   | 2026-07-31 |
 | 3. AI Correction | 0/0 | Not started | - |
