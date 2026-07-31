@@ -98,6 +98,183 @@ struct AccessibilityBridgeTests {
     }
 }
 
+// MARK: - ClipboardBridge Tests
+
+@Suite("ClipboardBridge")
+struct ClipboardBridgeTests {
+
+    @Test("Conforms to TextIOProtocol")
+    func conformsToTextIOProtocol() {
+        let bridge = ClipboardBridge()
+        #expect(bridge is TextIOProtocol, "ClipboardBridge must conform to TextIOProtocol")
+    }
+
+    @Test("Can be instantiated without parameters")
+    func canBeInstantiatedWithoutParameters() {
+        let bridge = ClipboardBridge()
+        #expect(bridge as AnyObject != nil)
+    }
+
+    @Test("isPasswordField always returns false (password check is upstream)")
+    func isPasswordFieldAlwaysFalse() {
+        let bridge = ClipboardBridge()
+        // ClipboardBridge does NOT read the target app — password check is done
+        // upstream by AccessibilityBridge at the CompositeTextIO level.
+        #expect(!bridge.isPasswordField(), "ClipboardBridge.isPasswordField() must always return false")
+    }
+}
+
+// MARK: - Mock Bridges for CompositeTextIO Tests
+
+/// Mock bridge that always succeeds — used to test the primary path.
+private final class MockSuccessBridge: TextIOProtocol {
+    var insertCallCount = 0
+    var lastInsertedText: String?
+
+    func insertText(_ text: String) async throws {
+        insertCallCount += 1
+        lastInsertedText = text
+    }
+
+    var isPasswordFieldReturnValue = false
+    func isPasswordField() -> Bool { isPasswordFieldReturnValue }
+}
+
+/// Mock bridge that always throws — used to test the fallback path.
+private final class MockFailingBridge: TextIOProtocol {
+    let errorToThrow: TextInsertionError
+
+    init(error: TextInsertionError = .noFocusedApp) {
+        self.errorToThrow = error
+    }
+
+    func insertText(_ text: String) async throws {
+        throw errorToThrow
+    }
+
+    var isPasswordFieldReturnValue = false
+    func isPasswordField() -> Bool { isPasswordFieldReturnValue }
+}
+
+/// Mock bridge that tracks whether it was called — used as fallback.
+private final class MockTrackingBridge: TextIOProtocol {
+    var insertCallCount = 0
+    var lastInsertedText: String?
+    var shouldThrow = false
+
+    func insertText(_ text: String) async throws {
+        insertCallCount += 1
+        lastInsertedText = text
+        if shouldThrow {
+            throw TextInsertionError.allStrategiesFailed
+        }
+    }
+
+    var isPasswordFieldReturnValue = false
+    func isPasswordField() -> Bool { isPasswordFieldReturnValue }
+}
+
+// MARK: - CompositeTextIO Tests
+
+@Suite("CompositeTextIO")
+struct CompositeTextIOTests {
+
+    @Test("Primary path succeeds — fallback is never called")
+    func primarySucceedsFallbackNotCalled() async throws {
+        let primary = MockSuccessBridge()
+        let fallback = MockTrackingBridge()
+
+        let composite = CompositeTextIO(primary: primary, fallback: fallback)
+        try await composite.insertText("hello")
+
+        #expect(primary.insertCallCount == 1, "Primary should be called exactly once")
+        #expect(primary.lastInsertedText == "hello")
+        #expect(fallback.insertCallCount == 0, "Fallback should NOT be called when primary succeeds")
+    }
+
+    @Test("Primary fails — fallback is invoked automatically")
+    func primaryFailsFallbackInvoked() async throws {
+        let primary = MockFailingBridge(error: .noFocusedApp)
+        let fallback = MockTrackingBridge()
+
+        let composite = CompositeTextIO(primary: primary, fallback: fallback)
+        try await composite.insertText("test text")
+
+        #expect(fallback.insertCallCount == 1, "Fallback should be called when primary fails")
+        #expect(fallback.lastInsertedText == "test text", "Fallback should receive the same text")
+    }
+
+    @Test("Both primary and fallback fail — throws allStrategiesFailed")
+    func bothFailThrowsAllStrategiesFailed() async {
+        let primary = MockFailingBridge(error: .noFocusedElement)
+        let fallback = MockTrackingBridge()
+        fallback.shouldThrow = true
+
+        let composite = CompositeTextIO(primary: primary, fallback: fallback)
+
+        do {
+            try await composite.insertText("doomed")
+            Issue.record("Expected allStrategiesFailed but no error was thrown")
+        } catch let error as TextInsertionError {
+            #expect(error == .allStrategiesFailed)
+        } catch {
+            Issue.record("Expected TextInsertionError.allStrategiesFailed, got \(error)")
+        }
+    }
+
+    @Test("Password field blocks insertion — primary.isPasswordField() = true (D-10)")
+    func passwordFieldBlocksInsertion() async {
+        let primary = MockSuccessBridge()
+        primary.isPasswordFieldReturnValue = true
+        let fallback = MockTrackingBridge()
+
+        let composite = CompositeTextIO(primary: primary, fallback: fallback)
+
+        do {
+            try await composite.insertText("secret")
+            Issue.record("Expected passwordFieldBlocked but no error was thrown")
+        } catch let error as TextInsertionError {
+            #expect(error == .passwordFieldBlocked)
+        } catch {
+            Issue.record("Expected TextInsertionError.passwordFieldBlocked, got \(error)")
+        }
+
+        // Neither bridge should have been called when password field is detected
+        #expect(primary.insertCallCount == 0, "Primary should NOT be called for password fields")
+        #expect(fallback.insertCallCount == 0, "Fallback should NOT be called for password fields")
+    }
+
+    @Test("CompositeTextIO is itself a TextIOProtocol")
+    func compositeTextIOIsTextIOProtocol() {
+        let composite: TextIOProtocol = CompositeTextIO(
+            primary: AccessibilityBridge(),
+            fallback: ClipboardBridge()
+        )
+        #expect(composite as AnyObject != nil)
+    }
+
+    @Test("isPasswordField delegates to primary bridge")
+    func isPasswordFieldDelegatesToPrimary() {
+        let primary = MockSuccessBridge()
+        primary.isPasswordFieldReturnValue = true
+        let fallback = MockTrackingBridge()
+
+        let composite = CompositeTextIO(primary: primary, fallback: fallback)
+        #expect(composite.isPasswordField(), "Should delegate to primary.isPasswordField()")
+    }
+
+    @Test("CompositeTextIO deinit — both bridges still valid after composite is gone")
+    func deinitDoesNotCrash() async throws {
+        var composite: CompositeTextIO? = CompositeTextIO(
+            primary: AccessibilityBridge(),
+            fallback: ClipboardBridge()
+        )
+        _ = composite  // Use it
+        composite = nil  // Deinit
+        // If we reach here without crash, deinit is safe
+    }
+}
+
 // MARK: - TextIOProtocol Structural Tests
 
 @Suite("TextIOProtocol")
