@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 
 /// Central state machine for the VoiceType application.
 /// Owns all subsystem instances and routes events between them.
@@ -29,6 +30,10 @@ final class AppCoordinator: ObservableObject {
     /// Used by MenuBarView to display hotkey permission status.
     @Published var hotkeyTapActive: Bool = false
 
+    /// Mirrors ModelDownloadManager.modelState for UI consumption.
+    /// Updated reactively when model download/loading state changes.
+    @Published var modelState: ModelDownloadManager.ModelState = .notLoaded
+
     // MARK: - Subsystem Instances
 
     /// Permission manager for TCC status checking (microphone + accessibility)
@@ -42,6 +47,17 @@ final class AppCoordinator: ObservableObject {
     /// Hotkey manager — CGEvent tap for system-wide global hotkey detection.
     /// Registered in initializeSubsystems() after permissions are confirmed.
     let hotkeyManager = HotkeyManager()
+
+    // MARK: - Phase 2 Subsystems (Transcription)
+
+    /// Model download manager — handles WhisperKit model download and lifecycle.
+    /// Creates the shared WhisperKit pipe, exposes @Published modelState for UI.
+    /// Model download begins in initializeSubsystems() — does not block menu bar startup.
+    let modelDownloadManager = ModelDownloadManager()
+
+    /// Transcription service — wraps the shared WhisperKit pipe for speech-to-text.
+    /// Available immediately but functional only after modelDownloadManager.initialize() completes.
+    let transcriptionService: TranscriptionService!
 
     // MARK: - Computed Properties
 
@@ -72,7 +88,16 @@ final class AppCoordinator: ObservableObject {
     // MARK: - Initialization
 
     init() {
+        // Create TranscriptionService with shared ModelDownloadManager reference.
+        // Must be initialized before any `self` reference (Swift strict init requirements).
+        self.transcriptionService = TranscriptionService(modelDownloadManager: self.modelDownloadManager)
+
         Log.app.info("AppCoordinator initializing — menu bar icon set to '\(self.iconName)'")
+
+        Log.app.info("TranscriptionService created")
+
+        // Listen for model state changes so AppCoordinator.modelState stays in sync
+        modelDownloadManager.$modelState.assign(to: &$modelState)
 
         // Register for audio device and silence notifications.
         // These must be set up in init so they are ready before the menu bar renders.
@@ -234,6 +259,13 @@ final class AppCoordinator: ObservableObject {
                 Log.app.info("Some permissions missing — user needs to complete setup")
             }
         }
+
+        // Begin async model download/loading — does not block menu bar.
+        // WhisperKit init runs in Task.detached inside ModelDownloadManager.initialize().
+        // The @Published modelState provides reactive state for Plan 03's HUD and error displays.
+        Log.app.info("Starting model download/initialization in background")
+        await self.modelDownloadManager.initialize()
+        Log.app.info("Model initialization flow started — state: \(self.modelState)")
     }
 
     // MARK: - Audio Capture Control
