@@ -178,22 +178,25 @@ final class HotkeyManager: @unchecked Sendable {
         let flags = event.flags
 
         if code == correctionKeyCode {
-            if down, flags.contains(.maskAlternate), !correctionFired {
-                correctionFired = true
-                Log.hotkey.info("纠错热键: ⌥+回车")
-                DispatchQueue.main.async { [weak self] in
-                    self?.onCorrectionKeyPress?()
-                    self?.coordinator?.onCorrectionKeyPress?()
+            let optionHeld = flags.contains(.maskAlternate)
+            if optionHeld {
+                // 消费所有带 Option 的回车事件——包括 auto-repeat（按住不放时
+                // 系统会重复发送 keyDown，若只消费第一次，重复的回车会透传进应用）
+                if down {
+                    if !correctionFired {
+                        correctionFired = true
+                        Log.hotkey.info("纠错热键: ⌥+回车")
+                        DispatchQueue.main.async { [weak self] in
+                            self?.onCorrectionKeyPress?()
+                            self?.coordinator?.onCorrectionKeyPress?()
+                        }
+                    }
+                } else {
+                    correctionFired = false
                 }
                 return true
             }
-            if !down {
-                correctionFired = false
-                // 消费 keyUp，避免输入法拦截生成多余字符
-                if flags.contains(.maskAlternate) {
-                    return true
-                }
-            }
+            // 不带 Option 的普通回车——正常透传
         }
 
         return false
