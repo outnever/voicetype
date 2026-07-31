@@ -70,19 +70,19 @@ final class ModelDownloadManager: ObservableObject {
         Log.transcription.info("ModelDownloadManager: starting model initialization for \(modelName)")
         modelState = .loading("正在准备语音模型…")
 
-        // 设置 HuggingFace 镜像端点，绕过网络限制（无需翻墙）
-        setenv("HF_ENDPOINT", ModelDownloadManager.hfMirrorURL, 1)
-
         do {
             let newPipe = try await Task.detached(priority: .userInitiated) {
                 Log.transcription.info("WhisperKit: initializing with model \(modelName)")
 
-                let pipe = try await WhisperKit(
+                // 通过 modelEndpoint 指定 HuggingFace 镜像（国内可直连，无需翻墙）
+                let config = WhisperKitConfig(
                     model: modelName,
                     verbose: false,
                     logLevel: .error,
-                    download: true
+                    download: true,
+                    modelEndpoint: ModelDownloadManager.hfMirrorURL
                 )
+                let pipe = try await WhisperKit(config)
                 Log.transcription.info("WhisperKit: model initialized successfully — \(modelName)")
                 return pipe
             }.value
