@@ -17,7 +17,7 @@ final class HotkeyManager: @unchecked Sendable {
 
     weak var coordinator: AppCoordinator?
 
-    private let correctionKeyCode: Int64 = 8   // kVK_ANSI_C
+    private let correctionKeyCode: Int64 = 36   // kVK_Return
 
     private var isFnDown: Bool = false
     private var correctionFired: Bool = false
@@ -178,9 +178,9 @@ final class HotkeyManager: @unchecked Sendable {
         let flags = event.flags
 
         if code == correctionKeyCode {
-            if down, flags.contains(.maskControl), flags.contains(.maskShift), !correctionFired {
+            if down, flags.contains(.maskAlternate), !correctionFired {
                 correctionFired = true
-                Log.hotkey.info("纠错热键: ⌃⇧C")
+                Log.hotkey.info("纠错热键: ⌥+回车")
                 DispatchQueue.main.async { [weak self] in
                     self?.onCorrectionKeyPress?()
                     self?.coordinator?.onCorrectionKeyPress?()
@@ -189,8 +189,8 @@ final class HotkeyManager: @unchecked Sendable {
             }
             if !down {
                 correctionFired = false
-                // 消费 keyUp，避免中文输入法拦截生成多余字符（如 Ç）
-                if flags.contains(.maskControl), flags.contains(.maskShift) {
+                // 消费 keyUp，避免输入法拦截生成多余字符
+                if flags.contains(.maskAlternate) {
                     return true
                 }
             }

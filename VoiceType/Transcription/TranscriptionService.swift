@@ -82,9 +82,20 @@ final class TranscriptionService: ObservableObject {
         // Post-process: remove filler words
         let cleanedText = removeFillerWords(from: resultText)
 
-        let duration = Date().timeIntervalSince(startTime)
-        Log.transcription.info("TranscriptionService: transcription finished — \(cleanedText.count) chars in \(String(format: "%.2f", duration))s")
+        // Post-process: convert Traditional Chinese to Simplified (D-14: 简体优先)
+        let simplifiedText = convertToSimplifiedChinese(cleanedText)
 
-        return cleanedText
+        let duration = Date().timeIntervalSince(startTime)
+        Log.transcription.info("TranscriptionService: transcription finished — \(simplifiedText.count) chars in \(String(format: "%.2f", duration))s")
+
+        return simplifiedText
     }
+}
+
+/// 将繁体中文转换为简体中文。
+/// 使用系统自带 CFStringTransform，无需额外依赖。
+private func convertToSimplifiedChinese(_ text: String) -> String {
+    let mutable = NSMutableString(string: text)
+    CFStringTransform(mutable, nil, kCFStringTransformTraditionalToSimplified, false)
+    return mutable as String
 }

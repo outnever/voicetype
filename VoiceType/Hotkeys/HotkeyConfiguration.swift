@@ -22,12 +22,14 @@ enum HotkeyDefaults {
         description: "Fn (按住说话)"
     )
 
-    /// 纠错热键: Ctrl+Shift+C (press-to-trigger)
+    /// 纠错热键: ⌥+回车 (press-to-trigger)
+    /// 不用 Ctrl+Shift——中文输入法会拦截为中英文切换（发出咯哒声）。
+    /// 不用 Option+C——macOS 会输出 Ç。Option+Return 无字符输出且输入法不冲突。
     static let correction = HotkeyDefinition(
-        keyCode: 8,   // kVK_ANSI_C
-        modifiers: [.maskControl, .maskShift],
+        keyCode: 36,  // kVK_Return
+        modifiers: .maskAlternate,  // Option (⌥)
         mode: .pressToTrigger,
-        description: "⌃⇧C (按下纠错)"
+        description: "⌥ 回车 (按下纠错)"
     )
 }
 

@@ -16,7 +16,7 @@ enum Defaults {
 
     /// Display string for the correction hotkey shown in Settings.
     /// v1 default: Ctrl+Shift+C (press-to-trigger). v2 will allow customization.
-    static let correctionKeyDisplay = "⌃⇧C (按下纠错)"
+    static let correctionKeyDisplay = "⌥ 回车 (按下纠错)"
 
     // MARK: - LLM Provider
 
