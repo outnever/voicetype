@@ -79,6 +79,12 @@ final class ClipboardBridge: TextIOProtocol {
         false
     }
 
+    /// 剪贴板方案无法读取目标应用内容——返回空字符串。
+    /// 纠错功能需要读取上下文，因此剪贴板桥不支持纠错（由 CompositeTextIO 处理）。
+    func readContext() async throws -> String {
+        ""
+    }
+
     // MARK: - Cmd+V Simulation
 
     /// Simulate a Cmd+V keystroke via CGEvent post to `.cghidEventTap`.

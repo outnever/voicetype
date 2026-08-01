@@ -24,4 +24,10 @@ protocol TextIOProtocol {
     /// Callers (CompositeTextIO) must gate `insertText` on this check
     /// per D-10: password fields must never receive dictation text.
     func isPasswordField() -> Bool
+
+    /// 读取当前光标所在输入框的完整内容（用于纠错的上下文）。
+    ///
+    /// - Returns: 输入框内全部文字；失败时抛 `TextInsertionError`。
+    /// - Note: 这是纠错功能的前置步骤——大模型需要上下文才能定位要修改的片段。
+    func readContext() async throws -> String
 }

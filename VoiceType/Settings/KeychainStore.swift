@@ -62,6 +62,12 @@ final class KeychainStore {
         return string
     }
 
+    /// 安全读取——失败返回 nil 而非抛错（用于 API 调用场景）。
+    func retrieveQuiet(key: String) -> String? {
+        guard exists(key: key) else { return nil }
+        return try? retrieve(key: key)
+    }
+
     func delete(key: String) throws {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,

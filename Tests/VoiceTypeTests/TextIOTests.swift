@@ -140,6 +140,8 @@ private final class MockSuccessBridge: TextIOProtocol {
 
     var isPasswordFieldReturnValue = false
     func isPasswordField() -> Bool { isPasswordFieldReturnValue }
+
+    func readContext() async throws -> String { "mock context" }
 }
 
 /// Mock bridge that always throws — used to test the fallback path.
@@ -156,6 +158,8 @@ private final class MockFailingBridge: TextIOProtocol {
 
     var isPasswordFieldReturnValue = false
     func isPasswordField() -> Bool { isPasswordFieldReturnValue }
+
+    func readContext() async throws -> String { "" }
 }
 
 /// Mock bridge that tracks whether it was called — used as fallback.
@@ -174,6 +178,8 @@ private final class MockTrackingBridge: TextIOProtocol {
 
     var isPasswordFieldReturnValue = false
     func isPasswordField() -> Bool { isPasswordFieldReturnValue }
+
+    func readContext() async throws -> String { "mock context" }
 }
 
 // MARK: - CompositeTextIO Tests

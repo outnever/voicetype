@@ -27,8 +27,13 @@ final class HotkeyManager: @unchecked Sendable {
 
     private(set) var isRegistered: Bool = false
 
-    var onDictationKeyDown: (() -> Void)?
-    var onDictationKeyUp: (() -> Void)?
+    // 长按 Fn 触发纠错模式（按住不放 >500ms 才开始录音）
+    var onFnLongPress: (() -> Void)?
+
+    // 长按后松开（结束纠错录音）——只在长按已触发后才回调
+    var onFnReleaseAfterLongPress: (() -> Void)?
+
+    // ⌥+回车 快速纠错（备选热键）
     var onCorrectionKeyPress: (() -> Void)?
 
     init() {
@@ -144,26 +149,57 @@ final class HotkeyManager: @unchecked Sendable {
         return Unmanaged.passUnretained(event)
     }
 
-    // MARK: - Fn 检测（flagsChanged）
+    // MARK: - Fn 长按检测（flagsChanged）
 
     /// Fn 键只发 flagsChanged——检测 .maskSecondaryFn 标志的变化。
+    ///
+    /// 长按语义（>500ms）触发纠错模式：
+    /// - 按下 → 启动 500ms 计时器，不立即触发
+    /// - 500ms 内松开 → 忽略（macOS 系统的"双击 Fn 听写"不受影响）
+    /// - 超过 500ms → 触发纠错录音开始
+    /// - 长按后松开 → 触发纠错录音结束
+    private let fnLongPressThreshold: TimeInterval = 0.5
+    private var fnPressTimer: DispatchSourceTimer?
+    /// 长按是否已触发（决定释放时是否回调 onFnReleaseAfterLongPress）
+    private var fnLongPressFired = false
+
     private func handleFn(event: CGEvent) -> Bool {
         let nowDown = event.flags.contains(.maskSecondaryFn)
 
         if nowDown && !isFnDown {
             isFnDown = true
-            Log.hotkey.info("Fn 按下——开始听写")
-            DispatchQueue.main.async { [weak self] in
-                self?.onDictationKeyDown?()
-                self?.coordinator?.onDictationKeyDown?()
+            fnLongPressFired = false
+            Log.hotkey.info("Fn 按下——等待长按判定（\(Int(fnLongPressThreshold * 1000))ms）")
+
+            // 启动长按计时器
+            let timer = DispatchSource.makeTimerSource(queue: .global(qos: .userInitiated))
+            timer.schedule(deadline: .now() + fnLongPressThreshold)
+            timer.setEventHandler { [weak self] in
+                // 长按触发——进入纠错模式（主线程派发）
+                DispatchQueue.main.async {
+                    guard let self, self.isFnDown else { return }
+                    self.fnLongPressFired = true
+                    Log.hotkey.info("Fn 长按触发——开始纠错录音")
+                    self.onFnLongPress?()
+                    self.coordinator?.onCorrectionKeyPress?()
+                }
             }
+            timer.resume()
+            fnPressTimer = timer
             return true
         } else if !nowDown && isFnDown {
             isFnDown = false
-            Log.hotkey.info("Fn 释放——结束听写")
-            DispatchQueue.main.async { [weak self] in
-                self?.onDictationKeyUp?()
-                self?.coordinator?.onDictationKeyUp?()
+            // 取消长按计时器
+            fnPressTimer?.cancel()
+            fnPressTimer = nil
+            if fnLongPressFired {
+                // 长按已触发——通知释放（结束纠错录音）
+                Log.hotkey.info("Fn 长按后松开——结束纠错录音")
+                DispatchQueue.main.async { [weak self] in
+                    self?.onFnReleaseAfterLongPress?()
+                }
+            } else {
+                Log.hotkey.info("Fn 短按忽略（系统双击听写不受影响）")
             }
             return true
         }

@@ -71,6 +71,11 @@ final class AppCoordinator: ObservableObject {
         fallback: ClipboardBridge()
     )
 
+    // MARK: - Phase 3 Subsystems (Correction)
+
+    /// 大模型纠错引擎——读取上下文、调用 LLM、验证并替换。
+    let correctionEngine = CorrectionEngine()
+
     // MARK: - Phase 3 Subsystems (HUD)
 
     /// HUD window controller — floating overlay for recording/transcribing status.
@@ -81,7 +86,7 @@ final class AppCoordinator: ObservableObject {
 
     /// Race condition guard: prevents overlapping dictation pipelines (T-02-12).
     /// Set to true when dictation hotkey fires, false when pipeline completes.
-    private var isDictating = false
+    private var isCorrecting = false
 
     /// Combine cancellables storage for reactive state subscriptions.
     private var cancellables = Set<AnyCancellable>()
@@ -212,24 +217,26 @@ final class AppCoordinator: ObservableObject {
     private func setupHotkeyCallbacks() {
         hotkeyManager.coordinator = self
 
-        // DICTATION: Fn key hold-to-talk (D-03)
-        hotkeyManager.onDictationKeyDown = { [weak self] in
-            guard let self else { return }
-            Log.app.info("Dictation hotkey pressed")
+        // 架构调整：听写交给 macOS 系统（双击 Fn）。
+        // VoiceType 只做纠错——长按 Fn（>500ms）触发纠错录音。
 
-            // Race condition guard (T-02-12): prevent overlapping dictation pipelines
-            guard !self.isDictating else {
-                Log.app.warning("Dictation attempted while pipeline already active — ignoring")
+        // 长按 Fn → 开始纠错录音（识别纠错指令）
+        hotkeyManager.onFnLongPress = { [weak self] in
+            guard let self else { return }
+            Log.app.info("Fn 长按——开始纠错录音")
+
+            // Race condition guard: prevent overlapping correction pipelines
+            guard !self.isCorrecting else {
+                Log.app.warning("Correction already active — ignoring")
                 return
             }
 
-            // 请求识别权限（首次会弹 TCC 窗口）
-            self.isDictating = true
-            self.state = .recording
+            self.isCorrecting = true
+            self.state = .correcting
             self.iconName = "mic.fill.badge.ellipsis"
-            self.statusMessage = "录音中…"
-            self.hudController.show()  // D-11
-            Log.app.info("Starting Apple speech recognition session")
+            self.statusMessage = "说出纠错指令…"
+            self.hudController.show()
+            Log.app.info("Starting correction instruction recording")
 
             Task { @MainActor in
                 guard await self.appleSpeech.requestAuthorization() else {
@@ -237,92 +244,85 @@ final class AppCoordinator: ObservableObject {
                     self.iconName = "mic.fill"
                     self.statusMessage = "需要语音识别权限"
                     self.hudController.hide()
-                    self.isDictating = false
+                    self.isCorrecting = false
                     return
                 }
 
-                // 启动流式识别会话，把音频 buffer 转发给识别器
                 do {
                     let request = try self.appleSpeech.startSession()
                     self.audioCapture.onAudioBuffer = { buffer in
                         request.append(buffer)
                     }
                     try self.audioCapture.start()
-                    Log.audio.info("Audio capture + Apple speech recognition started")
+                    Log.audio.info("Audio capture + speech recognition started (correction)")
                 } catch {
                     self.state = .error("麦克风不可用: \(error.localizedDescription)")
                     self.iconName = "mic.fill"
                     self.statusMessage = "麦克风不可用"
                     self.hudController.hide()
-                    self.isDictating = false
+                    self.isCorrecting = false
                     Log.audio.error("Failed to start audio capture: \(error)")
                 }
             }
         }
 
-        hotkeyManager.onDictationKeyUp = { [weak self] in
+        // 长按后松开 → 结束录音，识别纠错指令，调用大模型
+        hotkeyManager.onFnReleaseAfterLongPress = { [weak self] in
             guard let self else { return }
-            Log.app.info("Dictation hotkey released — finishing speech recognition")
+            Log.app.info("Fn 长按后松开——结束纠错录音")
 
-            guard self.isDictating else { return }
+            guard self.isCorrecting else { return }
 
             // 停止音频采集（先解绑 buffer 转发再停）
             self.audioCapture.onAudioBuffer = nil
             self.audioCapture.stop()
 
-            self.state = .transcribing
+            self.state = .correcting
             self.iconName = "arrow.triangle.2.circlepath"
-            self.statusMessage = "转录中…"
+            self.statusMessage = "分析纠错指令…"
 
             Task { @MainActor in
-                // 结束识别会话，拿到最终文本
-                let text = await self.appleSpeech.finishSession()
-                Log.speech.info("Final transcription: \"\(text)\"")
+                // 识别纠错指令文本
+                let instruction = await self.appleSpeech.finishSession()
+                Log.speech.info("Correction instruction: \"\(instruction)\"")
 
-                guard !text.isEmpty else {
-                    self.state = .idle
-                    self.iconName = "mic.fill"
-                    self.statusMessage = "就绪"
-                    self.hudController.hide()
-                    self.isDictating = false
-                    Log.app.info("Empty transcription — no text inserted")
+                guard !instruction.isEmpty else {
+                    self.resetToIdle()
+                    Log.app.info("Empty instruction — no correction performed")
                     return
                 }
 
                 do {
-                    // Insert text at cursor (DICT-06)
-                    try await self.textIO.insertText(text)
+                    // 读取光标处上下文 + 执行大模型纠错
+                    let corrected = try await self.correctionEngine.correct(
+                        instruction: instruction
+                    )
 
-                    // Success: return to idle, dismiss HUD (D-12)
-                    self.state = .idle
-                    self.iconName = "mic.fill"
-                    self.statusMessage = "就绪"
-                    self.hudController.hide()
-                    self.isDictating = false
-                    Log.app.info("Dictation pipeline complete")
-                } catch let error as TextInsertionError {
-                    // D-19: AX fails → already auto-fallback to clipboard
-                    Log.textIO.error("Text insertion failed: \(error)")
-                    self.state = .error("文字输入失败: \(error.localizedDescription)")
-                    self.iconName = "mic.fill"
-                    self.statusMessage = "输入失败——请重试"
-                    self.hudController.hide()
-                    self.isDictating = false
-
-                    // UXFE-02: Auto-reset error after 5s
-                    try? await Task.sleep(nanoseconds: 5_000_000_000)
-                    if case .error = self.state {
-                        self.state = .idle
+                    guard corrected.success else {
+                        self.state = .error("纠错失败: \(corrected.message)")
+                        self.iconName = "mic.fill"
+                        self.statusMessage = "纠错失败"
+                        self.hudController.hide()
+                        self.isCorrecting = false
+                        try? await Task.sleep(nanoseconds: 5_000_000_000)
+                        if case .error = self.state {
+                            self.state = .idle
+                        }
+                        return
                     }
-                } catch {
-                    Log.app.error("Dictation pipeline failed: \(error)")
-                    self.state = .error("听写失败: \(error.localizedDescription)")
-                    self.iconName = "mic.fill"
-                    self.statusMessage = "听写失败"
-                    self.hudController.hide()
-                    self.isDictating = false
 
-                    // UXFE-02: Auto-reset error after 5s
+                    // 插入修正文本
+                    try await self.textIO.insertText(corrected.replacementText)
+
+                    self.resetToIdle()
+                    Log.app.info("Correction complete: \"\(corrected.replacementText)\"")
+                } catch {
+                    Log.app.error("Correction failed: \(error)")
+                    self.state = .error("纠错失败: \(error.localizedDescription)")
+                    self.iconName = "mic.fill"
+                    self.statusMessage = "纠错失败"
+                    self.hudController.hide()
+                    self.isCorrecting = false
                     try? await Task.sleep(nanoseconds: 5_000_000_000)
                     if case .error = self.state {
                         self.state = .idle
@@ -331,21 +331,27 @@ final class AppCoordinator: ObservableObject {
             }
         }
 
-        // CORRECTION: ⌥+回车 (unchanged Phase 3 placeholder)
+        // ⌥+回车 → 快速纠错（press 模式，无"松开"事件）。
+        // 触发开始录音后，用固定时长（4秒）自动结束——v1 简化，后续加 VAD 静默检测。
         hotkeyManager.onCorrectionKeyPress = { [weak self] in
             guard let self else { return }
-            Log.app.info("Correction hotkey pressed — transitioning to .correcting")
-            self.state = .correcting
-            self.statusMessage = "纠错中…"
-            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
-                if self?.state == .correcting {
-                    self?.state = .idle
-                    self?.statusMessage = "就绪"
-                }
+            Log.app.info("⌥+回车 快速纠错触发")
+            self.hotkeyManager.onFnLongPress?()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 4.0) { [weak self] in
+                self?.hotkeyManager.onFnReleaseAfterLongPress?()
             }
         }
 
-        Log.app.info("Hotkey callbacks wired with dictation pipeline")
+        Log.app.info("Hotkey callbacks wired with correction pipeline")
+    }
+
+    /// 重置状态到就绪。
+    private func resetToIdle() {
+        state = .idle
+        iconName = "mic.fill"
+        statusMessage = "就绪"
+        hudController.hide()
+        isCorrecting = false
     }
 
     /// Sets up NotificationCenter observers for hotkey subsystem health.
