@@ -61,18 +61,18 @@ final class HUDWindowController: NSWindowController {
 
     // MARK: - 可见性控制
 
-    /// 显示 HUD，居中于主屏幕。
+    /// 显示 HUD，位于主屏幕左下角（不遮挡中央内容）。
     ///
-    /// 每次调用时重新计算屏幕中心，以便在外接显示器热插拔后正确居中。
+    /// 每次调用时重新计算位置，以便在外接显示器热插拔后正确布局。
     /// `orderFrontRegardless()` 确保即使应用不是前台应用，HUD 也能显示。
     func show() {
         guard let window else { return }
 
-        // 动态居中——响应主屏幕变化
+        // 左下角定位——避免遮挡屏幕中央的内容
         if let screen = NSScreen.main {
             let screenRect = screen.visibleFrame
-            let x = screenRect.midX - 90
-            let y = screenRect.midY - 200
+            let x = screenRect.minX + 24
+            let y = screenRect.minY + 24
             window.setFrameOrigin(NSPoint(x: x, y: y))
         }
 

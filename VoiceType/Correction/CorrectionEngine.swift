@@ -105,9 +105,17 @@ final class CorrectionEngine {
         )
 
         // 4. 根据模式分发执行
-        if response.mode == "full_text", let fullText = response.full_text, !fullText.isEmpty {
-            // 全文性操作：整体替换（全选 → 写入新文本）
-            return try await applyFullTextReplacement(fullText: fullText)
+        if response.mode == "full_text" {
+            // 全文性操作：整体替换（全选 → 写入新文本）。
+            // 注意：full_text 可能为空字符串（"把全部内容删掉"）——空串是合法结果。
+            if let fullText = response.full_text {
+                return try await applyFullTextReplacement(fullText: fullText)
+            }
+            return CorrectionResult(
+                success: false,
+                replacementText: "",
+                message: "大模型未返回处理结果"
+            )
         }
 
         // 局部修改：逐条验证并精确替换
@@ -122,17 +130,25 @@ final class CorrectionEngine {
 
         var appliedCount = 0
         for edit in edits {
-            guard context.contains(edit.original), !edit.original.isEmpty else {
+            // 容错匹配：LLM 返回的 original 可能带首尾空白（如换行符边界）。
+            // 先试原文，再试 trim 后的版本——都找不到才跳过。
+            let trimmed = edit.original.trimmingCharacters(in: .whitespacesAndNewlines)
+            let originalToUse: String
+            if !edit.original.isEmpty && context.contains(edit.original) {
+                originalToUse = edit.original
+            } else if !trimmed.isEmpty && context.contains(trimmed) {
+                originalToUse = trimmed
+            } else {
                 Log.app.warning("LLM returned original not found in context: \"\(edit.original.prefix(50))\"")
                 continue
             }
 
             do {
-                try await textIO.replaceText(original: edit.original, replacement: edit.replacement)
+                try await textIO.replaceText(original: originalToUse, replacement: edit.replacement)
                 appliedCount += 1
-                Log.app.info("Correction #\(appliedCount): \"\(edit.original.prefix(30))\" → \"\(edit.replacement.prefix(30))\" (\(edit.reason))")
+                Log.app.info("Correction #\(appliedCount): \"\(originalToUse.prefix(30))\" → \"\(edit.replacement.prefix(30))\" (\(edit.reason))")
             } catch {
-                Log.app.error("Replace failed for \"\(edit.original.prefix(30))\": \(error)")
+                Log.app.error("Replace failed for \"\(originalToUse.prefix(30))\": \(error)")
                 continue
             }
         }
