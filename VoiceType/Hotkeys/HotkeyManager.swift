@@ -130,7 +130,8 @@ final class HotkeyManager: @unchecked Sendable {
             if handleKey(event: event, down: type == .keyDown) { return nil }
 
         case .flagsChanged:
-            if handleFn(event: event) { return nil }
+            // Fn 事件必须透传（不消费）——macOS 系统"双击 Fn 听写"需要收到这些事件。
+            handleFn(event: event)
 
         case .tapDisabledByTimeout, .tapDisabledByUserInput:
             if let tap = eventTap {
@@ -163,7 +164,7 @@ final class HotkeyManager: @unchecked Sendable {
     /// 长按是否已触发（决定释放时是否回调 onFnReleaseAfterLongPress）
     private var fnLongPressFired = false
 
-    private func handleFn(event: CGEvent) -> Bool {
+    private func handleFn(event: CGEvent) {
         let nowDown = event.flags.contains(.maskSecondaryFn)
 
         if nowDown && !isFnDown {
@@ -186,7 +187,6 @@ final class HotkeyManager: @unchecked Sendable {
             }
             timer.resume()
             fnPressTimer = timer
-            return true
         } else if !nowDown && isFnDown {
             isFnDown = false
             // 取消长按计时器
@@ -201,10 +201,7 @@ final class HotkeyManager: @unchecked Sendable {
             } else {
                 Log.hotkey.info("Fn 短按忽略（系统双击听写不受影响）")
             }
-            return true
         }
-
-        return false
     }
 
     // MARK: - 纠错热键 Ctrl+Shift+C
