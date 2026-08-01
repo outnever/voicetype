@@ -13,6 +13,7 @@ let package = Package(
         .package(url: "https://github.com/argmaxinc/argmax-oss-swift.git", from: "0.9.0"),
         .package(url: "https://github.com/MacPaw/OpenAI.git", branch: "main"),
         .package(url: "https://github.com/apple/swift-log.git", from: "1.6.0"),
+        .package(url: "https://github.com/swiftlang/swift-testing.git", from: "0.12.0"),
     ],
     targets: [
         .executableTarget(
@@ -29,6 +30,7 @@ let package = Package(
             dependencies: [
                 "VoiceType",
                 .product(name: "WhisperKit", package: "argmax-oss-swift"),
+                .product(name: "Testing", package: "swift-testing"),
             ],
             path: "Tests/VoiceTypeTests"
         )

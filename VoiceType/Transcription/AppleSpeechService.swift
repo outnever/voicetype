@@ -41,11 +41,16 @@ final class AppleSpeechService: ObservableObject {
             return true
         case .notDetermined:
             // 注意：TCC 的 completion handler 在后台队列调用。
-            // 不能在 handler 里创建 Task { @MainActor in }——Swift 6 隔离断言会崩溃。
-            // continuation.resume 是线程安全的，resume 后自动恢复在 MainActor 上下文。
-            let granted = await withCheckedContinuation { continuation in
+            // 不能在 handler 里直接 continuation.resume——resume 触发 MainActor
+            // 隔离断言（_dispatch_assert_queue → swift_task_checkIsolatedSwift），
+            // Swift 6.3 工具链下直接 SIGTRAP 崩溃（实测）。
+            // 先跳到主队列再 resume：主队列即 MainActor 执行器，断言通过。
+            let granted = await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
                 SFSpeechRecognizer.requestAuthorization { status in
-                    continuation.resume(returning: status == .authorized)
+                    let authorized = (status == .authorized)
+                    DispatchQueue.main.async {
+                        continuation.resume(returning: authorized)
+                    }
                 }
             }
             isAuthorized = granted

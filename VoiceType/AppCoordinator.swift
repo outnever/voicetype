@@ -168,6 +168,7 @@ final class AppCoordinator: ObservableObject {
         // happens in initializeSubsystems() after permissions are confirmed.
         setupHotkeyCallbacks()
         setupHotkeyObservers()
+        setupPermissionObserver()
 
         // SHEL-01 / PITFALLS.md §7: All heavy operations are deferred to background.
         // The menu bar icon renders immediately with default values.
@@ -398,6 +399,38 @@ final class AppCoordinator: ObservableObject {
         Log.app.info("Hotkey health observers registered")
     }
 
+    /// 权限变化观察者：麦克风 + 辅助功能都就绪时自动注册热键。
+    ///
+    /// 修复启动时序问题：热键注册原本只在启动时（initializeSubsystems 内）
+    /// 且权限当时已齐全才执行。若用户启动后再补齐权限，热键永远不会注册。
+    /// 通过 Combine 监听两个 @Published 权限字段，补齐权限后立即注册，无需重启。
+    private func setupPermissionObserver() {
+        permissionManager.$microphoneGranted
+            .combineLatest(permissionManager.$accessibilityGranted)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] mic, ax in
+                MainActor.assumeIsolated {
+                    self?.registerHotkeysIfReady(mic: mic, ax: ax)
+                }
+            }
+            .store(in: &cancellables)
+    }
+
+    /// 两个权限都就绪时注册全局热键（幂等，已注册则跳过）。
+    private func registerHotkeysIfReady(mic: Bool, ax: Bool) {
+        guard mic && ax else { return }
+        guard !hotkeyManager.isRegistered else { return }
+        do {
+            try hotkeyManager.register()
+            hotkeyTapActive = true
+            hotkeyManager.startWatchdog()
+            Log.app.info("HotkeyManager registered and watchdog started")
+        } catch {
+            Log.app.error("HotkeyManager registration failed: \(error.localizedDescription)")
+            hotkeyTapActive = false
+        }
+    }
+
     /// Perform all slow initialization work on a background task.
     /// Permission checks, model loading, keychain reads — anything that
     /// might block or trigger system dialogs belongs here.
@@ -431,15 +464,10 @@ final class AppCoordinator: ObservableObject {
                 // If registration fails (e.g., CGEvent tap creation), the app
                 // remains functional without hotkeys and the user is notified
                 // via the permission gate UI.
-                do {
-                    try self?.hotkeyManager.register()
-                    self?.hotkeyTapActive = true
-                    self?.hotkeyManager.startWatchdog()
-                    Log.app.info("HotkeyManager registered and watchdog started")
-                } catch {
-                    Log.app.error("HotkeyManager registration failed: \(error.localizedDescription)")
-                    self?.hotkeyTapActive = false
-                }
+                self?.registerHotkeysIfReady(
+                    mic: self?.permissionManager.microphoneGranted ?? false,
+                    ax: self?.permissionManager.accessibilityGranted ?? false
+                )
             } else {
                 self?.statusMessage = "需要授权"
                 Log.app.info("Some permissions missing — user needs to complete setup")
