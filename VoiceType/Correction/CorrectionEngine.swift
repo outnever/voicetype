@@ -219,14 +219,51 @@ final class CorrectionEngine {
             throw CorrectionError.emptyResponse
         }
 
-        // 解析纠错 JSON（content 可能包含 ```json 包裹，需要清理）
+        // 解析纠错 JSON（content 可能包含 ```json 包裹、前后缀、或未转义控制字符）
+        let edit = try parseEditJSON(from: content)
+        return edit
+    }
+
+    /// 从 LLM 返回的 content 中健壮地解析纠错 JSON。
+    ///
+    /// 上下文可能包含乱码控制字符（如 ÇÇÇ、段落符），LLM 可能原样返回它们
+    /// 导致 JSON 中出现未转义的控制字符（0x00-0x1F）——JSONDecoder 直接解析会失败。
+    /// 处理：
+    /// 1. 提取第一个 `{...}` 完整对象
+    /// 2. 过滤非法控制字符（保留 \t \n \r）
+    /// 3. 用宽松方式解析
+    private func parseEditJSON(from content: String) throws -> CorrectionEdit {
+        // 1. 去掉 markdown 包裹
         let cleaned = content
             .replacingOccurrences(of: "```json", with: "")
             .replacingOccurrences(of: "```", with: "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
 
-        let edit = try JSONDecoder().decode(CorrectionEdit.self, from: Data(cleaned.utf8))
-        return edit
+        // 2. 提取第一个 { 到最后一个 } 之间的内容
+        guard let start = cleaned.firstIndex(of: "{"),
+              let end = cleaned.lastIndex(of: "}"),
+              start < end else {
+            Log.app.error("LLM response has no JSON object: \(content.prefix(100))")
+            throw CorrectionError.emptyResponse
+        }
+        let jsonCandidate = String(cleaned[start...end])
+
+        // 3. 过滤未转义的控制字符（0x00-0x1F，除 \t \n \r 外）
+        //    这些字符在 JSON 字符串字面量中必须转义，LLM 可能直接输出原始字符
+        let filtered = jsonCandidate.filter { char in
+            guard let ascii = char.asciiValue else { return true }
+            return ascii >= 0x20 || ascii == 9 || ascii == 10 || ascii == 13
+        }
+
+        // 4. 解析
+        do {
+            return try JSONDecoder().decode(
+                CorrectionEdit.self,
+                from: Data(filtered.utf8)
+            )
+        } catch {
+            Log.app.error("LLM JSON parse failed: \(error) — content: \(content.prefix(200))")
+            throw CorrectionError.invalidResponse
+        }
     }
 
     // MARK: - 工具
@@ -252,6 +289,7 @@ struct CorrectionEdit: Codable {
 enum CorrectionError: Error, LocalizedError {
     case apiError(status: Int)
     case emptyResponse
+    case invalidResponse
     case noProviderConfigured
     case contextUnavailable
 
@@ -261,6 +299,8 @@ enum CorrectionError: Error, LocalizedError {
             return "大模型 API 错误（HTTP \(status)）"
         case .emptyResponse:
             return "大模型返回为空"
+        case .invalidResponse:
+            return "大模型返回格式异常——请重试"
         case .noProviderConfigured:
             return "未配置 API Key"
         case .contextUnavailable:
