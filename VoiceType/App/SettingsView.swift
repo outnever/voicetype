@@ -16,6 +16,10 @@ struct SettingsView: View {
     @AppStorage(SpeechLanguageSettings.defaultsKey)
     private var speechLanguageRaw: String = SpeechLanguage.simplifiedChinese.rawValue
 
+    /// 开机自启动开关状态
+    @State private var launchAtLoginEnabled = false
+    @State private var launchAtLoginStatus = ""
+
     var body: some View {
         TabView {
             generalTab
@@ -46,8 +50,41 @@ struct SettingsView: View {
                 Divider()
 
                 languageSection
+
+                Divider()
+
+                launchAtLoginSection
             }
             .padding(24)
+        }
+    }
+
+    // MARK: - 开机自启动区
+
+    private var launchAtLoginSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("开机自启动")
+                .font(.headline)
+
+            Toggle("登录后自动启动 VoiceType", isOn: $launchAtLoginEnabled)
+                .toggleStyle(.switch)
+
+            Text(launchAtLoginStatus)
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+        .onAppear {
+            launchAtLoginEnabled = LaunchAtLoginManager.isEnabled
+            launchAtLoginStatus = LaunchAtLoginManager.statusDescription
+        }
+        .onChange(of: launchAtLoginEnabled) { _, enabled in
+            if enabled {
+                try? LaunchAtLoginManager.enable()
+            } else {
+                LaunchAtLoginManager.disable()
+            }
+            // 刷新状态描述
+            launchAtLoginStatus = LaunchAtLoginManager.statusDescription
         }
     }
 

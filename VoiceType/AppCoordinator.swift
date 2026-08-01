@@ -240,6 +240,7 @@ final class AppCoordinator: ObservableObject {
             self.statusMessage = "说出纠错指令…"
             self.lastCorrectionMessage = ""
             self.hudController.show()
+            SoundManager.playStartSound()
             Log.app.info("Starting correction instruction recording")
 
             Task { @MainActor in
@@ -280,6 +281,7 @@ final class AppCoordinator: ObservableObject {
             // 停止音频采集（先解绑 buffer 转发再停）
             self.audioCapture.onAudioBuffer = nil
             self.audioCapture.stop()
+            SoundManager.playStopSound()
 
             self.state = .correcting
             self.iconName = "arrow.triangle.2.circlepath"
@@ -321,6 +323,7 @@ final class AppCoordinator: ObservableObject {
                     // 替换已在 CorrectionEngine 内部完成（精确替换，不重复插入）
                     self.lastCorrectionMessage = "✓ \(corrected.message)"
                     self.hudController.show()
+                    SoundManager.playCompleteSound()
                     self.resetToIdle()
                     Log.app.info("Correction complete: \(corrected.message)")
                 } catch {
@@ -330,6 +333,7 @@ final class AppCoordinator: ObservableObject {
                     self.statusMessage = "纠错失败"
                     self.lastCorrectionMessage = "❌ 纠错失败: \(error.localizedDescription)"
                     self.hudController.show()
+                    SoundManager.playErrorSound()
                     self.isCorrecting = false
                     try? await Task.sleep(nanoseconds: 5_000_000_000)
                     if case .error = self.state {
