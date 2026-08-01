@@ -5,6 +5,11 @@ struct VoiceTypeApp: App {
     @StateObject private var coordinator = AppCoordinator()
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
+    init() {
+        // 初始化双通道日志（OSLog + 文件）——必须在任何 Logger 使用前调用
+        Log.enableFileLogging()
+    }
+
     var body: some Scene {
         MenuBarExtra("VoiceType", systemImage: coordinator.iconName) {
             MenuBarView()
