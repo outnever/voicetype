@@ -91,6 +91,67 @@ final class ClipboardBridge: TextIOProtocol {
         throw TextInsertionError.allStrategiesFailed
     }
 
+    /// 全选替换：剪贴板方案可以做到（保存→写剪贴板→Cmd+A 全选→Cmd+V 粘贴→恢复）。
+    /// 比 AX 方案侵入性高，作为全文替换的回退。
+    func replaceAllText(_ newText: String) async throws {
+        let pasteboard = NSPasteboard.general
+
+        // Step 1: Save original clipboard content
+        let originalString = pasteboard.string(forType: .string)
+
+        // Step 2: Write new text to clipboard
+        pasteboard.clearContents()
+        pasteboard.setString(newText, forType: .string)
+
+        // Step 3: Wait for clipboard write to propagate
+        try await Task.sleep(nanoseconds: 100_000_000)
+
+        // Step 4: Select all, then paste
+        simulateCommandA()
+        try await Task.sleep(nanoseconds: 100_000_000)
+        simulateCommandV()
+
+        // Step 5: Wait for paste to complete
+        try await Task.sleep(nanoseconds: 200_000_000)
+
+        // Step 6: Restore original clipboard content
+        pasteboard.clearContents()
+        if let original = originalString {
+            guard pasteboard.setString(original, forType: .string) else {
+                Log.textIO.error("ClipboardBridge: failed to restore original clipboard content")
+                throw TextInsertionError.clipboardRestoreFailed
+            }
+        }
+
+        Log.textIO.info("ClipboardBridge: save→select-all→paste→restore cycle completed (\(newText.count) chars)")
+    }
+
+    // MARK: - Cmd+V Simulation
+
+    /// Simulate a Cmd+A keystroke (select all) via CGEvent post to `.cghidEventTap`.
+    private func simulateCommandA() {
+        let source = CGEventSource(stateID: .combinedSessionState)
+
+        if let cmdDown = CGEvent(keyboardEventSource: source, virtualKey: 0x37, keyDown: true) {
+            cmdDown.flags = .maskCommand
+            cmdDown.post(tap: .cghidEventTap)
+        }
+
+        if let aDown = CGEvent(keyboardEventSource: source, virtualKey: 0x00, keyDown: true) {
+            aDown.flags = .maskCommand
+            aDown.post(tap: .cghidEventTap)
+        }
+
+        if let aUp = CGEvent(keyboardEventSource: source, virtualKey: 0x00, keyDown: false) {
+            aUp.flags = .maskCommand
+            aUp.post(tap: .cghidEventTap)
+        }
+
+        if let cmdUp = CGEvent(keyboardEventSource: source, virtualKey: 0x37, keyDown: false) {
+            cmdUp.post(tap: .cghidEventTap)
+        }
+    }
+
     // MARK: - Cmd+V Simulation
 
     /// Simulate a Cmd+V keystroke via CGEvent post to `.cghidEventTap`.

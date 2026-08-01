@@ -39,4 +39,11 @@ protocol TextIOProtocol {
     ///   - replacement: 替换后的新内容
     /// - Throws: `TextInsertionError` 如果找不到片段或写入失败。
     func replaceText(original: String, replacement: String) async throws
+
+    /// 全选替换：用 `newText` 替换输入框内全部内容。
+    ///
+    /// 用于全文性操作（去空行、清理乱码、格式化等）。
+    /// - Parameter newText: 替换后的完整文本。
+    /// - Throws: `TextInsertionError` 如果无法全选或写入失败。
+    func replaceAllText(_ newText: String) async throws
 }

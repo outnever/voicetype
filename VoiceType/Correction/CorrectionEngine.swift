@@ -95,8 +95,8 @@ final class CorrectionEngine {
         }
         Log.app.info("Correction using provider: \(config.displayName) (\(config.model))")
 
-        // 3. 调用大模型，获取结构化纠错（可能多个编辑）
-        let edits = try await requestEdit(
+        // 3. 调用大模型，获取结构化纠错（双模式：edits / full_text）
+        let response = try await requestEdit(
             providerKey: providerKey,
             config: config,
             apiKey: apiKey,
@@ -104,6 +104,14 @@ final class CorrectionEngine {
             instruction: instruction
         )
 
+        // 4. 根据模式分发执行
+        if response.mode == "full_text", let fullText = response.full_text, !fullText.isEmpty {
+            // 全文性操作：整体替换（全选 → 写入新文本）
+            return try await applyFullTextReplacement(fullText: fullText)
+        }
+
+        // 局部修改：逐条验证并精确替换
+        let edits = response.edits ?? []
         guard !edits.isEmpty else {
             return CorrectionResult(
                 success: false,
@@ -112,7 +120,6 @@ final class CorrectionEngine {
             )
         }
 
-        // 4. 逐条验证并执行替换（每个 original 必须逐字存在于上下文，防幻觉）
         var appliedCount = 0
         for edit in edits {
             guard context.contains(edit.original), !edit.original.isEmpty else {
@@ -145,6 +152,28 @@ final class CorrectionEngine {
         )
     }
 
+    // MARK: - 全文性操作
+
+    /// 全文性操作：用 AX 全选当前输入框内容，写入处理后的完整文本。
+    private func applyFullTextReplacement(fullText: String) async throws -> CorrectionResult {
+        do {
+            try await textIO.replaceAllText(fullText)
+            Log.app.info("Full-text replacement applied: \(fullText.count) chars")
+            return CorrectionResult(
+                success: true,
+                replacementText: fullText,
+                message: "已处理全文"
+            )
+        } catch {
+            Log.app.error("Full-text replacement failed: \(error)")
+            return CorrectionResult(
+                success: false,
+                replacementText: "",
+                message: "全文替换失败——目标应用可能不支持全选替换（\(error.localizedDescription)）"
+            )
+        }
+    }
+
     // MARK: - 供应商选择
 
     /// 选择可用的供应商：优先 DeepSeek，其次用户已配置的。
@@ -163,29 +192,33 @@ final class CorrectionEngine {
     // MARK: - LLM 调用
 
     /// 请求大模型返回结构化纠错（OpenAI 兼容 chat/completions API）。
-    /// - Returns: 纠错编辑数组（可能多个）。
+    /// - Returns: 纠错响应（双模式）。
     private func requestEdit(
         providerKey: String,
         config: ProviderConfig,
         apiKey: String,
         context: String,
         instruction: String
-    ) async throws -> [CorrectionEdit] {
+    ) async throws -> CorrectionEditResponse {
         let url = URL(string: config.baseURL + "/chat/completions")!
 
         let systemPrompt = """
         你是一个文本纠错助手。用户会提供一段文字（上下文）和一条纠错指令。
-        请找到需要修改的精确原文片段，并给出替换后的内容。
-        只输出 JSON，格式如下（参考示例）：
-        {"edits": [{"original": "需要修改的原文片段", "replacement": "替换后的内容", "reason": "修改原因（一句话）"}]}
-        示例输出：
-        {"edits": [{"original": "可不可以输啊", "replacement": "可不可以输入啊", "reason": "漏了入字"}]}
+        请判断指令属于哪种操作，并按要求输出 JSON：
+
+        模式一：局部修改（改某个词/句、删一句、换一个说法）
+        输出：{"mode": "edits", "edits": [{"original": "需要修改的原文片段", "replacement": "替换后的内容", "reason": "修改原因"}]}
+        示例：{"mode": "edits", "edits": [{"original": "可不可以输啊", "replacement": "可不可以输入啊", "reason": "漏了入字"}]}
+
+        模式二：全文性操作（去掉所有多余空行/清理全部乱码/整体格式化/批量替换同一类内容）
+        输出：{"mode": "full_text", "full_text": "处理后的完整文本", "reason": "处理说明"}
+        示例：{"mode": "full_text", "full_text": "处理后的完整文本内容", "reason": "移除了所有多余空行"}
+
         规则：
-        - original 必须是上下文中真实存在的子串，逐字匹配（包括乱码字符，必须原样复制，不可修改）
-        - 每个 original 取最小的独立片段——批量操作（如"去掉所有乱码"）拆成多个编辑，每个乱码片段一个编辑
-        - 只修改用户要求的部分，不要改动其他内容
-        - 如果指令是补充内容（如"加上逗号"），original 取受影响的最小片段
-        - 最多返回 10 个编辑
+        - 局部修改时：original 必须是上下文中真实存在的子串，逐字匹配；每个 original 取最小的独立片段；最多 10 个编辑
+        - 全文性操作时：full_text 是完整文本的替换，可自由重排/清理，但不得改变用户没要求的语义内容
+        - 全文性操作不要用 edits 模式（几十个片段会超出长度限制）
+        - 只修改用户要求的部分
         """
 
         let userPrompt = """
@@ -240,7 +273,7 @@ final class CorrectionEngine {
 
         // 解析纠错 JSON（content 可能包含 ```json 包裹、前后缀、或未转义控制字符）
         let editResponse = try parseEditJSON(from: content)
-        return editResponse.edits
+        return editResponse
     }
 
     /// 从 LLM 返回的 content 中健壮地解析纠错 JSON。
@@ -273,19 +306,26 @@ final class CorrectionEngine {
             return ascii >= 0x20 || ascii == 9 || ascii == 10 || ascii == 13
         }
 
-        // 4. 解析——先按 edits 数组格式，失败则兼容单编辑格式
+        // 4. 解析——优先新格式（mode/edits/full_text），兼容旧格式（edits 数组、单编辑）
         do {
             return try JSONDecoder().decode(
                 CorrectionEditResponse.self,
                 from: Data(filtered.utf8)
             )
         } catch {
-            // 兼容单编辑格式 {"original":..., "replacement":..., "reason":...}
+            // 兼容旧格式1：{"edits": [{...}]}（无 mode 字段时默认 edits）
+            if let legacy = try? JSONDecoder().decode(
+                LegacyEditsResponse.self,
+                from: Data(filtered.utf8)
+            ) {
+                return CorrectionEditResponse(mode: "edits", edits: legacy.edits, full_text: nil, reason: nil)
+            }
+            // 兼容旧格式2：单编辑 {"original":..., "replacement":..., "reason":...}
             if let single = try? JSONDecoder().decode(
                 CorrectionEdit.self,
                 from: Data(filtered.utf8)
             ) {
-                return CorrectionEditResponse(edits: [single])
+                return CorrectionEditResponse(mode: "edits", edits: [single], full_text: nil, reason: nil)
             }
             Log.app.error("LLM JSON parse failed: \(error) — content: \(content.prefix(200))")
             throw CorrectionError.invalidResponse
@@ -310,8 +350,20 @@ struct CorrectionEdit: Codable {
     let reason: String
 }
 
-/// 大模型返回的完整响应（支持多个编辑）。
+/// 大模型返回的完整响应（双模式：edits 局部修改 / full_text 全文性操作）。
 struct CorrectionEditResponse: Codable {
+    /// "edits" 或 "full_text"
+    var mode: String?
+    /// 局部修改的编辑列表
+    var edits: [CorrectionEdit]?
+    /// 全文性操作的处理后完整文本
+    var full_text: String?
+    /// 处理说明
+    var reason: String?
+}
+
+/// 兼容旧格式 {"edits": [...]}（无 mode 字段）。
+private struct LegacyEditsResponse: Codable {
     let edits: [CorrectionEdit]
 }
 

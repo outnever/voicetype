@@ -147,6 +147,11 @@ private final class MockSuccessBridge: TextIOProtocol {
         insertCallCount += 1
         lastInsertedText = replacement
     }
+
+    func replaceAllText(_ newText: String) async throws {
+        insertCallCount += 1
+        lastInsertedText = newText
+    }
 }
 
 /// Mock bridge that always throws — used to test the fallback path.
@@ -167,6 +172,10 @@ private final class MockFailingBridge: TextIOProtocol {
     func readContext() async throws -> String { "" }
 
     func replaceText(original: String, replacement: String) async throws {
+        throw errorToThrow
+    }
+
+    func replaceAllText(_ newText: String) async throws {
         throw errorToThrow
     }
 }
@@ -193,6 +202,14 @@ private final class MockTrackingBridge: TextIOProtocol {
     func replaceText(original: String, replacement: String) async throws {
         insertCallCount += 1
         lastInsertedText = replacement
+        if shouldThrow {
+            throw TextInsertionError.allStrategiesFailed
+        }
+    }
+
+    func replaceAllText(_ newText: String) async throws {
+        insertCallCount += 1
+        lastInsertedText = newText
         if shouldThrow {
             throw TextInsertionError.allStrategiesFailed
         }

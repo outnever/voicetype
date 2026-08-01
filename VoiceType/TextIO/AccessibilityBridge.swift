@@ -293,6 +293,81 @@ final class AccessibilityBridge: TextIOProtocol {
 
         Log.textIO.info("AXUIElement: replaced \"\(original)\" → \"\(replacement)\" at range \(foundRange.location)-\(foundRange.length)")
     }
+
+    /// 全选替换：选中输入框全部内容，写入新文本。
+    ///
+    /// 用于全文性操作（去空行、清理乱码、格式化等）。
+    /// 实现：读取全文长度 → 设置选中范围 [0, length] → 写入新文本。
+    func replaceAllText(_ newText: String) async throws {
+        // 定位聚焦元素（与 readContext 相同路径）
+        let systemWide = AXUIElementCreateSystemWide()
+
+        var focusedApp: CFTypeRef?
+        let appResult = AXUIElementCopyAttributeValue(
+            systemWide,
+            kAXFocusedApplicationAttribute as CFString,
+            &focusedApp
+        )
+        guard appResult == .success, let app = focusedApp else {
+            Log.textIO.warning("AXUIElement: no focused application — appResult=\(appResult.rawValue)")
+            throw TextInsertionError.noFocusedApp
+        }
+
+        var focusedElement: CFTypeRef?
+        let elemResult = AXUIElementCopyAttributeValue(
+            app as! AXUIElement,
+            kAXFocusedUIElementAttribute as CFString,
+            &focusedElement
+        )
+        guard elemResult == .success, let element = focusedElement else {
+            Log.textIO.warning("AXUIElement: no focused element — elemResult=\(elemResult.rawValue)")
+            throw TextInsertionError.noFocusedElement
+        }
+
+        let axElement = element as! AXUIElement
+
+        // 读取当前全文长度（UTF-16）
+        var value: CFTypeRef?
+        let readResult = AXUIElementCopyAttributeValue(
+            axElement,
+            kAXValueAttribute as CFString,
+            &value
+        )
+        guard readResult == .success, let fullText = value as? String else {
+            Log.textIO.error("AXUIElement read failed: AXError(rawValue: \(readResult.rawValue))")
+            throw TextInsertionError.axWriteFailed(code: readResult.rawValue)
+        }
+
+        // 全选：设置选中范围 [0, length]
+        var cfRange = CFRange(location: 0, length: (fullText as NSString).length)
+        guard let axRange = AXValueCreate(AXValueType.cfRange, &cfRange) else {
+            Log.textIO.error("AXUIElement: failed to create AX range value")
+            throw TextInsertionError.axWriteFailed(code: -1)
+        }
+
+        let selectResult = AXUIElementSetAttributeValue(
+            axElement,
+            kAXSelectedTextRangeAttribute as CFString,
+            axRange
+        )
+        guard selectResult == .success else {
+            Log.textIO.error("AXUIElement select-all failed: AXError(rawValue: \(selectResult.rawValue))")
+            throw TextInsertionError.axWriteFailed(code: selectResult.rawValue)
+        }
+
+        // 写入新文本（替换选中内容）
+        let writeResult = AXUIElementSetAttributeValue(
+            axElement,
+            kAXSelectedTextAttribute as CFString,
+            newText as CFTypeRef
+        )
+        guard writeResult == .success else {
+            Log.textIO.error("AXUIElement replace-all write failed: AXError(rawValue: \(writeResult.rawValue))")
+            throw TextInsertionError.axWriteFailed(code: writeResult.rawValue)
+        }
+
+        Log.textIO.info("AXUIElement: replaced all text (\(fullText.count) → \(newText.count) chars)")
+    }
 }
 
 // MARK: - CompositeTextIO
@@ -392,5 +467,16 @@ final class CompositeTextIO: TextIOProtocol {
     /// 精确替换委托给 primary——只有 AX 桥能精确定位替换。
     func replaceText(original: String, replacement: String) async throws {
         try await primary.replaceText(original: original, replacement: replacement)
+    }
+
+    /// 全选替换：AX 优先，失败回退剪贴板（Cmd+A + Cmd+V）。
+    func replaceAllText(_ newText: String) async throws {
+        do {
+            try await primary.replaceAllText(newText)
+            Log.textIO.info("CompositeTextIO: full-text replaced via primary (AXUIElement)")
+        } catch {
+            Log.textIO.warning("CompositeTextIO: AX full-text replace failed (\(error)). Falling back to clipboard.")
+            try await fallback.replaceAllText(newText)
+        }
     }
 }
