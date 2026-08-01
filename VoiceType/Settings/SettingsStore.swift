@@ -25,48 +25,46 @@ final class SettingsStore: ObservableObject {
     @AppStorage(Defaults.Key.dictationLanguage)
     var dictationLanguage: String = Defaults.dictationLanguage
 
-    // MARK: - Keychain Instance
+    // MARK: - API Key 存储
 
-    /// Dedicated KeychainStore for API key persistence.
-    /// API keys are NEVER stored in @AppStorage or UserDefaults (T-01-01).
-    private let keychain = KeychainStore()
+    /// API Key 配置文件存储（用户要求不存钥匙串，改存应用配置文件）。
+    private let keyStore = ConfigFileStore()
 
     // MARK: - API Key Management
 
-    /// Save an API key to the macOS Keychain for the given provider.
+    /// Save an API key to the config file for the given provider.
     /// - Parameters:
-    ///   - provider: "openai" or "claude"
+    ///   - provider: "openai", "claude", "deepseek", "openrouter", "custom"
     ///   - key: The plaintext API key value
-    /// - Throws: KeychainError on storage failure
     func saveAPIKey(provider: String, key: String) throws {
         guard !key.isEmpty else {
             Log.settings.warning("Attempted to save empty API key for \(provider)")
             return
         }
-        try keychain.store(key: provider, value: key)
+        try keyStore.store(key: provider, value: key)
         Log.settings.info("API key saved for provider: \(provider)")
     }
 
     /// Get an obfuscated display string for the given provider's API key.
     /// Shows "••••" + last 4 characters, or "••••" if no key exists.
     func apiKeyDisplayString(for provider: String) -> String {
-        keychain.obfuscatedValue(for: provider)
+        keyStore.obfuscatedValue(for: provider)
     }
 
     /// Check whether an API key exists for the given provider.
     func hasAPIKey(for provider: String) -> Bool {
-        keychain.exists(key: provider)
+        keyStore.exists(key: provider)
     }
 
-    /// Delete the API key for the given provider from Keychain.
+    /// Delete the API key for the given provider from the config file.
     func deleteAPIKey(for provider: String) throws {
-        try keychain.delete(key: provider)
+        try keyStore.delete(key: provider)
         Log.settings.info("API key deleted for provider: \(provider)")
     }
 
     /// Retrieve the full API key for the given provider (for API calls, not UI display).
     /// - Returns: Plaintext key, or nil if not found
     func getAPIKey(for provider: String) -> String? {
-        try? keychain.retrieve(key: provider)
+        keyStore.retrieveQuiet(key: provider)
     }
 }

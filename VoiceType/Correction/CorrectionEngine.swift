@@ -57,15 +57,15 @@ final class CorrectionEngine {
     /// 文本 I/O——读取/替换光标处文字
     private let textIO: TextIOProtocol
 
-    /// Keychain 访问（读取 API Key）
-    private let keychain: KeychainStore
+    /// API Key 配置文件存储（读取 DeepSeek/OpenAI 等供应商的 Key）。
+    private let keyStore: ConfigFileStore
 
     init(textIO: TextIOProtocol = CompositeTextIO(
         primary: AccessibilityBridge(),
         fallback: ClipboardBridge()
-    ), keychain: KeychainStore = KeychainStore()) {
+    ), keyStore: ConfigFileStore = ConfigFileStore()) {
         self.textIO = textIO
-        self.keychain = keychain
+        self.keyStore = keyStore
     }
 
     // MARK: - 纠错入口
@@ -192,7 +192,7 @@ final class CorrectionEngine {
         let priorityOrder = ["deepseek", "openai", "openrouter"]
         for key in priorityOrder {
             guard let config = Self.providers[key] else { continue }
-            if let apiKey = keychain.retrieveQuiet(key: config.keychainKey), !apiKey.isEmpty {
+            if let apiKey = keyStore.retrieveQuiet(key: config.keychainKey), !apiKey.isEmpty {
                 return (key, config, apiKey)
             }
         }

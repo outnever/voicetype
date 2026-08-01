@@ -400,6 +400,9 @@ final class AppCoordinator: ObservableObject {
     private func initializeSubsystems() async {
         Log.app.info("Starting background subsystem initialization")
 
+        // 迁移：把钥匙串中的 API Key 迁到配置文件（用户要求），并清理钥匙串。
+        migrateKeychainToConfigFile()
+
         // Start audio device monitoring early — runs independently of audio capture.
         // This ensures we detect device changes even when not actively recording.
         // Device monitoring does not start the audio engine or request permissions.
@@ -442,6 +445,32 @@ final class AppCoordinator: ObservableObject {
         // Apple 语音识别为主（SFSpeechRecognizer，云端免费）。
         // WhisperKit 离线模式保留但默认不加载（避免 150MB 内存占用）。
         Log.app.info("Using Apple speech recognition (SFSpeechRecognizer) — WhisperKit offline mode disabled")
+    }
+
+    /// 把钥匙串中的 API Key 迁移到配置文件，并清理钥匙串。
+    ///
+    /// 用户要求：API Key 改存应用配置文件（不存钥匙串）。
+    /// 迁移逻辑：检查已知供应商，钥匙串有而配置文件没有的 → 迁移 + 删除钥匙串条目。
+    private func migrateKeychainToConfigFile() {
+        let legacyKeychain = KeychainStore()
+        let configFile = ConfigFileStore()
+        let providers = ["deepseek", "openai", "openrouter", "claude", "custom"]
+
+        for provider in providers {
+            // 配置文件已有 → 跳过
+            if configFile.exists(key: provider) { continue }
+
+            // 钥匙串有 → 迁移
+            guard let key = legacyKeychain.retrieveQuiet(key: provider), !key.isEmpty else { continue }
+
+            do {
+                try configFile.store(key: provider, value: key)
+                try legacyKeychain.delete(key: provider)
+                Log.app.info("已迁移 API Key 到配置文件: \(provider)")
+            } catch {
+                Log.app.error("迁移 API Key 失败 (\(provider)): \(error.localizedDescription)")
+            }
+        }
     }
 
 }
