@@ -4,11 +4,11 @@ import Logging
 
 /// 系统级全局热键管理器，通过 CGEvent tap 监听按键。
 ///
-/// 热键:
-/// - 听写: Fn 键按住说话、松手结束（通过 flagsChanged 检测 .maskSecondaryFn）
-/// - 纠错: Ctrl+Shift+C 按下即触发
+/// 热键（听写交系统，VoiceType 只监听纠错热键）:
+/// - Fn 长按（hold-to-talk）或 ⌥+回车 / ⌃+空格（press 模式）——由设置决定
 ///
 /// 匹配到的热键事件会被吞掉（return nil），不传递给前台应用。
+/// Fn 的 flagsChanged 事件透传（不消费）——不影响系统"双击 Fn 听写"。
 final class HotkeyManager: @unchecked Sendable {
 
     private var eventTap: CFMachPort?
@@ -16,8 +16,6 @@ final class HotkeyManager: @unchecked Sendable {
     private var tapThread: Thread?
 
     weak var coordinator: AppCoordinator?
-
-    private let correctionKeyCode: Int64 = 36   // kVK_Return
 
     private var isFnDown: Bool = false
     private var correctionFired: Bool = false
@@ -33,7 +31,7 @@ final class HotkeyManager: @unchecked Sendable {
     // 长按后松开（结束纠错录音）——只在长按已触发后才回调
     var onFnReleaseAfterLongPress: (() -> Void)?
 
-    // ⌥+回车 快速纠错（备选热键）
+    // ⌥+回车 / ⌃+空格 快速纠错（press 模式）
     var onCorrectionKeyPress: (() -> Void)?
 
     init() {
@@ -131,7 +129,10 @@ final class HotkeyManager: @unchecked Sendable {
 
         case .flagsChanged:
             // Fn 事件必须透传（不消费）——macOS 系统"双击 Fn 听写"需要收到这些事件。
-            handleFn(event: event)
+            // 仅当纠错热键配置为 Fn 长按时才检测长按。
+            if CorrectionHotkeySettings.current.isLongPress {
+                handleFn(event: event)
+            }
 
         case .tapDisabledByTimeout, .tapDisabledByUserInput:
             if let tap = eventTap {
@@ -206,21 +207,25 @@ final class HotkeyManager: @unchecked Sendable {
         }
     }
 
-    // MARK: - 纠错热键 Ctrl+Shift+C
+    // MARK: - 纠错热键（keyDown 方案：⌥+回车 / ⌃+空格）
 
     private func handleKey(event: CGEvent, down: Bool) -> Bool {
         let code = event.getIntegerValueField(.keyboardEventKeycode)
         let flags = event.flags
 
-        if code == correctionKeyCode {
-            let optionHeld = flags.contains(.maskAlternate)
-            if optionHeld {
-                // 消费所有带 Option 的回车事件——包括 auto-repeat（按住不放时
-                // 系统会重复发送 keyDown，若只消费第一次，重复的回车会透传进应用）
+        let style = CorrectionHotkeySettings.current
+        // Fn 长按方案走 flagsChanged，不走这里
+        guard !style.isLongPress else { return false }
+
+        if code == style.keyCode {
+            let modifierHeld = flags.contains(style.modifiers)
+            if modifierHeld {
+                // 消费所有带对应修饰键的事件——包括 auto-repeat（按住不放时
+                // 系统会重复发送 keyDown，若只消费第一次，重复的按键会透传进应用）
                 if down {
                     if !correctionFired {
                         correctionFired = true
-                        Log.hotkey.info("纠错热键: ⌥+回车")
+                        Log.hotkey.info("纠错热键: \(style.displayName)")
                         DispatchQueue.main.async { [weak self] in
                             self?.onCorrectionKeyPress?()
                             self?.coordinator?.onCorrectionKeyPress?()
@@ -231,7 +236,6 @@ final class HotkeyManager: @unchecked Sendable {
                 }
                 return true
             }
-            // 不带 Option 的普通回车——正常透传
         }
 
         return false

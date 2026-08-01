@@ -62,12 +62,13 @@ final class AppleSpeechService: ObservableObject {
 
     /// 开始一个流式识别会话。
     ///
-    /// - Parameter locale: 识别语言，默认 zh-CN（简体中文）。
+    /// - Parameter locale: 识别语言，默认取设置中的语言（默认简体中文）。
     /// - Returns: 音频缓冲区识别请求——调用方需把音频 buffer 持续 `append` 进来。
     /// - Throws: `SpeechServiceError.unavailable` 如果识别器不可用。
-    func startSession(locale: Locale = Locale(identifier: "zh-CN")) throws -> SFSpeechAudioBufferRecognitionRequest {
-        guard let recognizer = SFSpeechRecognizer(locale: locale), recognizer.isAvailable else {
-            Log.speech.error("SFSpeechRecognizer 不可用（locale: \(locale.identifier)）")
+    func startSession(locale: Locale? = nil) throws -> SFSpeechAudioBufferRecognitionRequest {
+        let effectiveLocale = locale ?? SpeechLanguageSettings.current.locale
+        guard let recognizer = SFSpeechRecognizer(locale: effectiveLocale), recognizer.isAvailable else {
+            Log.speech.error("SFSpeechRecognizer 不可用（locale: \(effectiveLocale.identifier)）")
             throw SpeechServiceError.unavailable
         }
 
@@ -98,7 +99,7 @@ final class AppleSpeechService: ObservableObject {
             }
         }
 
-        Log.speech.info("Apple 语音识别会话已开始（\(locale.identifier)）")
+        Log.speech.info("Apple 语音识别会话已开始（\(effectiveLocale.identifier)）")
         return request
     }
 

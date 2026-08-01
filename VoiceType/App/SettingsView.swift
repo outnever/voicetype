@@ -8,6 +8,14 @@ struct SettingsView: View {
     @EnvironmentObject var coordinator: AppCoordinator
     @StateObject private var settingsStore = SettingsStore()
 
+    /// 纠错热键方案（UserDefaults 持久化，切换立即生效）
+    @AppStorage(CorrectionHotkeySettings.defaultsKey)
+    private var correctionHotkeyStyleRaw: String = CorrectionHotkeyStyle.fnLongPress.rawValue
+
+    /// 语音识别语言（UserDefaults 持久化）
+    @AppStorage(SpeechLanguageSettings.defaultsKey)
+    private var speechLanguageRaw: String = SpeechLanguage.simplifiedChinese.rawValue
+
     var body: some View {
         TabView {
             generalTab
@@ -34,10 +42,6 @@ struct SettingsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 hotkeySection
-
-                Divider()
-
-                modelSection
 
                 Divider()
 
@@ -183,76 +187,40 @@ struct SettingsView: View {
             Text("快捷键")
                 .font(.headline)
 
+            // 听写——系统原生，不可配置
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("听写")
+                    Text("听写（系统）")
                         .font(.subheadline)
                         .fontWeight(.medium)
-                    Text(settingsStore.dictationKeyDisplay)
+                    Text("双击 Fn（macOS 系统功能）")
                         .font(.body)
                         .foregroundColor(.secondary)
                 }
 
                 Spacer()
-
-                Text("v2 可自定义")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Color.secondary.opacity(0.1))
-                    .cornerRadius(4)
             }
 
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("纠错")
-                        .font(.subheadline)
-                        .fontWeight(.medium)
-                    Text(settingsStore.correctionKeyDisplay)
-                        .font(.body)
-                        .foregroundColor(.secondary)
+            Divider()
+
+            // 纠错热键——可配置
+            VStack(alignment: .leading, spacing: 8) {
+                Text("纠错热键")
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+
+                Picker("纠错热键", selection: $correctionHotkeyStyleRaw) {
+                    ForEach(CorrectionHotkeyStyle.allCases, id: \.self) { style in
+                        Text(style.displayName).tag(style.rawValue)
+                    }
                 }
+                .labelsHidden()
+                .pickerStyle(.radioGroup)
 
-                Spacer()
-
-                Text("v2 可自定义")
+                Text("切换后立即生效。Fn 长按与系统双击听写不冲突。")
                     .font(.caption)
                     .foregroundColor(.secondary)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Color.secondary.opacity(0.1))
-                    .cornerRadius(4)
             }
-        }
-    }
-
-    // MARK: - 模型区
-
-    private var modelSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Whisper 模型")
-                .font(.headline)
-
-            HStack {
-                Text(settingsStore.whisperModelVariant)
-                    .font(.body)
-                    .foregroundColor(.secondary)
-
-                Spacer()
-
-                Text("Phase 2")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Color.secondary.opacity(0.1))
-                    .cornerRadius(4)
-            }
-
-            Text("模型选择和下载将在下个版本中开放。")
-                .font(.caption)
-                .foregroundColor(.secondary)
         }
     }
 
@@ -260,24 +228,20 @@ struct SettingsView: View {
 
     private var languageSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("语言")
+            Text("识别语言")
                 .font(.headline)
 
-            HStack {
-                Text(settingsStore.dictationLanguage == "auto" ? "自动检测" : settingsStore.dictationLanguage)
-                    .font(.body)
-                    .foregroundColor(.secondary)
-
-                Spacer()
-
-                Text("Phase 2")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Color.secondary.opacity(0.1))
-                    .cornerRadius(4)
+            Picker("识别语言", selection: $speechLanguageRaw) {
+                ForEach(SpeechLanguage.allCases, id: \.self) { lang in
+                    Text(lang.displayName).tag(lang.rawValue)
+                }
             }
+            .labelsHidden()
+            .pickerStyle(.radioGroup)
+
+            Text("用于纠错指令的语音识别。简体中文为默认推荐。")
+                .font(.caption)
+                .foregroundColor(.secondary)
         }
     }
 
