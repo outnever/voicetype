@@ -36,9 +36,19 @@ struct HUDOverlayView: View {
                     .lineLimit(2)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
+
+            // 最近一次修正结果（常驻显示）
+            if !correctionMessage.isEmpty {
+                Text(correctionMessage)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.white)
+                    .multilineTextAlignment(.leading)
+                    .lineLimit(2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
         .padding(12)
-        .frame(width: 300)
+        .frame(width: 320)
         .background(
             RoundedRectangle(cornerRadius: 12)
                 .fill(.ultraThinMaterial)
@@ -72,5 +82,10 @@ struct HUDOverlayView: View {
     /// 实时识别文本（Apple 语音识别的流式结果）。
     private var liveText: String {
         coordinator.appleSpeech.liveText
+    }
+
+    /// 最近一次修正结果（常驻显示）。
+    private var correctionMessage: String {
+        coordinator.lastCorrectionMessage
     }
 }

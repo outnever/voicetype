@@ -193,9 +193,16 @@ final class AccessibilityBridge: TextIOProtocol {
             kAXValueAttribute as CFString,
             &value
         )
-        guard readResult == .success, let text = value as? String else {
+        // kAXErrorNoValue (-25212)：元素存在但无值——空文本框，返回空字符串（合法）
+        guard readResult == .success || readResult == .noValue else {
             Log.textIO.error("AXUIElement read failed: AXError(rawValue: \(readResult.rawValue))")
             throw TextInsertionError.axWriteFailed(code: readResult.rawValue)
+        }
+
+        guard let text = value as? String else {
+            // 无值或非字符串——视为空上下文
+            Log.textIO.info("AXUIElement: context empty or non-string")
+            return ""
         }
 
         Log.textIO.info("AXUIElement: read \(text.count) chars of context")

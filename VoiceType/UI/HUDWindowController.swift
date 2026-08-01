@@ -61,6 +61,11 @@ final class HUDWindowController: NSWindowController {
 
     // MARK: - 可见性控制
 
+    /// HUD 当前是否可见。
+    var isVisible: Bool {
+        window?.isVisible ?? false
+    }
+
     /// 显示 HUD，位于主屏幕左下角（不遮挡中央内容）。
     ///
     /// 每次调用时重新计算位置，以便在外接显示器热插拔后正确布局。

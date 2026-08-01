@@ -86,6 +86,16 @@ struct MenuBarView: View {
             }
             .buttonStyle(.plain)
 
+            // 常驻状态面板开关
+            Button(action: toggleHUD) {
+                HStack {
+                    Image(systemName: coordinator.hudController.isVisible ? "rectangle.on.rectangle" : "rectangle")
+                    Text(coordinator.hudController.isVisible ? "隐藏状态面板" : "显示状态面板")
+                    Spacer()
+                }
+            }
+            .buttonStyle(.plain)
+
             Divider()
 
             Button(action: quitApp) {
@@ -126,6 +136,11 @@ struct MenuBarView: View {
         case .idle:
             return .green
         }
+    }
+
+    /// 切换常驻状态面板的显示/隐藏。
+    private func toggleHUD() {
+        coordinator.toggleHUD()
     }
 
     private func openSettings() {

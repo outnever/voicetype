@@ -34,6 +34,9 @@ final class AppCoordinator: ObservableObject {
     /// Updated reactively when model download/loading state changes.
     @Published var modelState: ModelDownloadManager.ModelState = .notLoaded
 
+    /// 最近一次修正的结果信息（HUD 常驻显示）。
+    @Published var lastCorrectionMessage: String = ""
+
     // MARK: - Subsystem Instances
 
     /// Permission manager for TCC status checking (microphone + accessibility)
@@ -235,6 +238,7 @@ final class AppCoordinator: ObservableObject {
             self.state = .correcting
             self.iconName = "mic.fill.badge.ellipsis"
             self.statusMessage = "说出纠错指令…"
+            self.lastCorrectionMessage = ""
             self.hudController.show()
             Log.app.info("Starting correction instruction recording")
 
@@ -287,6 +291,8 @@ final class AppCoordinator: ObservableObject {
                 Log.speech.info("Correction instruction: \"\(instruction)\"")
 
                 guard !instruction.isEmpty else {
+                    self.lastCorrectionMessage = "未识别到指令——请长按 Fn 再说一次"
+                    self.hudController.show()
                     self.resetToIdle()
                     Log.app.info("Empty instruction — no correction performed")
                     return
@@ -302,7 +308,8 @@ final class AppCoordinator: ObservableObject {
                         self.state = .error("纠错失败: \(corrected.message)")
                         self.iconName = "mic.fill"
                         self.statusMessage = "纠错失败"
-                        self.hudController.hide()
+                        self.lastCorrectionMessage = "❌ \(corrected.message)"
+                        self.hudController.show()
                         self.isCorrecting = false
                         try? await Task.sleep(nanoseconds: 5_000_000_000)
                         if case .error = self.state {
@@ -312,6 +319,8 @@ final class AppCoordinator: ObservableObject {
                     }
 
                     // 替换已在 CorrectionEngine 内部完成（精确替换，不重复插入）
+                    self.lastCorrectionMessage = "✓ \(corrected.message)"
+                    self.hudController.show()
                     self.resetToIdle()
                     Log.app.info("Correction complete: \(corrected.message)")
                 } catch {
@@ -319,7 +328,8 @@ final class AppCoordinator: ObservableObject {
                     self.state = .error("纠错失败: \(error.localizedDescription)")
                     self.iconName = "mic.fill"
                     self.statusMessage = "纠错失败"
-                    self.hudController.hide()
+                    self.lastCorrectionMessage = "❌ 纠错失败: \(error.localizedDescription)"
+                    self.hudController.show()
                     self.isCorrecting = false
                     try? await Task.sleep(nanoseconds: 5_000_000_000)
                     if case .error = self.state {
@@ -344,12 +354,24 @@ final class AppCoordinator: ObservableObject {
     }
 
     /// 重置状态到就绪。
+    ///
+    /// HUD 保持常驻（不隐藏）——显示最近一次修正结果，直到新一轮操作。
     private func resetToIdle() {
         state = .idle
         iconName = "mic.fill"
         statusMessage = "就绪"
-        hudController.hide()
         isCorrecting = false
+    }
+
+    /// 菜单栏开关：显示/隐藏常驻状态面板（HUD）。
+    func toggleHUD() {
+        if hudController.isVisible {
+            hudController.hide()
+            statusMessage = "面板已隐藏（菜单栏可重新打开）"
+        } else {
+            hudController.show()
+            statusMessage = "就绪"
+        }
     }
 
     /// Sets up NotificationCenter observers for hotkey subsystem health.

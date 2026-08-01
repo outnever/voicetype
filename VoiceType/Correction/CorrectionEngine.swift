@@ -75,15 +75,9 @@ final class CorrectionEngine {
     /// - Parameter instruction: 用户说出的纠错指令（如"把窗间改成创建"）。
     /// - Returns: 纠错结果。
     func correct(instruction: String) async throws -> CorrectionResult {
-        // 1. 读取光标处上下文
+        // 1. 读取光标处上下文（可能为空——空文本框也是合法场景："在这里写XX"）
         let context = try await textIO.readContext()
-        guard !context.isEmpty else {
-            return CorrectionResult(
-                success: false,
-                replacementText: "",
-                message: "无法读取光标处文字——请确认光标在输入框内且应用支持辅助功能"
-            )
-        }
+        Log.app.info("Correction context: \(context.count) chars")
 
         // 2. 选择供应商（优先 DeepSeek，回退其他已配置的）
         guard let (providerKey, config, apiKey) = resolveProvider() else {
@@ -229,6 +223,10 @@ final class CorrectionEngine {
         模式二：全文性操作（去掉所有多余空行/清理全部乱码/整体格式化/批量替换同一类内容）
         输出：{"mode": "full_text", "full_text": "处理后的完整文本", "reason": "处理说明"}
 
+        模式三：新增内容（上下文为空或很短，用户要求"写/添加/插入XX内容"）
+        输出：{"mode": "full_text", "full_text": "要写入的内容", "reason": "新增内容说明"}
+        示例：{"mode": "full_text", "full_text": "天青色等烟雨，而我在等你……", "reason": "根据指令生成歌词"}
+
         【重要】纠错指令是语音识别结果，可能包含同音字/近似音错误。
         例如用户说"把块变成慢"，可能被识别成"把快变成卖"。
         你必须结合上下文内容和语境，推断用户的真实意图，不要机械地按指令字面执行。
@@ -237,7 +235,8 @@ final class CorrectionEngine {
         规则：
         - 局部修改时：original 必须是上下文中真实存在的子串，逐字匹配（包括乱码字符，必须原样复制，不可修改）；每个 original 取最小的独立片段；最多 10 个编辑
         - 全文性操作时：full_text 是完整文本的替换，可自由重排/清理，但不得改变用户没要求的语义内容
-        - 全文性操作不要用 edits 模式（几十个片段会超出长度限制）
+        - 新增内容时：full_text 是全新内容（要插入的文字），上下文为空也正常
+        - 全文性操作和新增内容不要用 edits 模式（几十个片段会超出长度限制）
         - 只修改用户要求的部分
         """
 
