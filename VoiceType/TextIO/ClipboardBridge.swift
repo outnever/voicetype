@@ -85,6 +85,12 @@ final class ClipboardBridge: TextIOProtocol {
         ""
     }
 
+    /// 剪贴板方案无法精确定位替换片段——抛错。
+    /// 纠错的精确替换只能通过 AX 桥完成。
+    func replaceText(original: String, replacement: String) async throws {
+        throw TextInsertionError.allStrategiesFailed
+    }
+
     // MARK: - Cmd+V Simulation
 
     /// Simulate a Cmd+V keystroke via CGEvent post to `.cghidEventTap`.

@@ -30,4 +30,13 @@ protocol TextIOProtocol {
     /// - Returns: 输入框内全部文字；失败时抛 `TextInsertionError`。
     /// - Note: 这是纠错功能的前置步骤——大模型需要上下文才能定位要修改的片段。
     func readContext() async throws -> String
+
+    /// 精确替换：找到 `original` 片段并选中，用 `replacement` 替换选中内容。
+    ///
+    /// 这是纠错的核心操作——只替换目标片段，其他内容原样保留。
+    /// - Parameters:
+    ///   - original: 要替换的原文片段（必须与输入框内内容逐字匹配）
+    ///   - replacement: 替换后的新内容
+    /// - Throws: `TextInsertionError` 如果找不到片段或写入失败。
+    func replaceText(original: String, replacement: String) async throws
 }

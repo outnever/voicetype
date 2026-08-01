@@ -114,17 +114,22 @@ final class CorrectionEngine {
             )
         }
 
-        // 5. 在完整上下文中替换（只替换第一个匹配）
-        let replaced = replaceFirstOccurrence(
-            of: edit.original,
-            with: edit.replacement,
-            in: context
-        )
+        // 5. 精确替换：只替换 original 片段，其他内容原样保留
+        do {
+            try await textIO.replaceText(original: edit.original, replacement: edit.replacement)
+        } catch {
+            Log.app.error("Replace failed: \(error)")
+            return CorrectionResult(
+                success: false,
+                replacementText: "",
+                message: "替换失败——目标应用可能不支持精确替换（\(error.localizedDescription)）"
+            )
+        }
 
         Log.app.info("Correction: \"\(edit.original)\" → \"\(edit.replacement)\" (\(edit.reason))")
         return CorrectionResult(
             success: true,
-            replacementText: replaced,
+            replacementText: edit.replacement,
             message: "已修正"
         )
     }

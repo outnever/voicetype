@@ -201,6 +201,98 @@ final class AccessibilityBridge: TextIOProtocol {
         Log.textIO.info("AXUIElement: read \(text.count) chars of context")
         return text
     }
+
+    /// 精确替换：定位 original 片段在输入框中的位置，选中它，然后用 replacement 替换。
+    ///
+    /// 实现思路（利用 AX 的选中即替换语义）：
+    /// 1. 读取完整文本，找到 original 的字符范围
+    /// 2. 设置 `kAXSelectedTextRangeAttribute` 选中该范围
+    /// 3. 写入 `kAXSelectedTextAttribute` = replacement —— 目标应用会用新文本替换选中内容
+    ///
+    /// 其他内容完全不受影响——这是纠错"只改指定部分"的关键。
+    func replaceText(original: String, replacement: String) async throws {
+        guard !original.isEmpty else {
+            throw TextInsertionError.allStrategiesFailed
+        }
+
+        // Step 1-3: 定位聚焦元素（与 readContext 相同路径）
+        let systemWide = AXUIElementCreateSystemWide()
+
+        var focusedApp: CFTypeRef?
+        let appResult = AXUIElementCopyAttributeValue(
+            systemWide,
+            kAXFocusedApplicationAttribute as CFString,
+            &focusedApp
+        )
+        guard appResult == .success, let app = focusedApp else {
+            Log.textIO.warning("AXUIElement: no focused application — appResult=\(appResult.rawValue)")
+            throw TextInsertionError.noFocusedApp
+        }
+
+        var focusedElement: CFTypeRef?
+        let elemResult = AXUIElementCopyAttributeValue(
+            app as! AXUIElement,
+            kAXFocusedUIElementAttribute as CFString,
+            &focusedElement
+        )
+        guard elemResult == .success, let element = focusedElement else {
+            Log.textIO.warning("AXUIElement: no focused element — elemResult=\(elemResult.rawValue)")
+            throw TextInsertionError.noFocusedElement
+        }
+
+        let axElement = element as! AXUIElement
+
+        // Step 4: 读取完整文本，定位 original 位置
+        var value: CFTypeRef?
+        let readResult = AXUIElementCopyAttributeValue(
+            axElement,
+            kAXValueAttribute as CFString,
+            &value
+        )
+        guard readResult == .success, let fullText = value as? String else {
+            Log.textIO.error("AXUIElement read failed: AXError(rawValue: \(readResult.rawValue))")
+            throw TextInsertionError.axWriteFailed(code: readResult.rawValue)
+        }
+
+        // 用 NSString 定位（AX 范围基于 UTF-16 位置）
+        let nsFullText = fullText as NSString
+        let searchRange = NSRange(location: 0, length: nsFullText.length)
+        let foundRange = nsFullText.range(of: original, options: [], range: searchRange)
+        guard foundRange.location != NSNotFound else {
+            Log.textIO.error("AXUIElement: original not found in context: \"\(original)\"")
+            throw TextInsertionError.allStrategiesFailed
+        }
+
+        // Step 5: 设置选中范围 = original 片段
+        var cfRange = CFRange(location: foundRange.location, length: foundRange.length)
+        guard let axRange = AXValueCreate(AXValueType.cfRange, &cfRange) else {
+            Log.textIO.error("AXUIElement: failed to create AX range value")
+            throw TextInsertionError.axWriteFailed(code: -1)
+        }
+
+        let selectResult = AXUIElementSetAttributeValue(
+            axElement,
+            kAXSelectedTextRangeAttribute as CFString,
+            axRange
+        )
+        guard selectResult == .success else {
+            Log.textIO.error("AXUIElement select failed: AXError(rawValue: \(selectResult.rawValue))")
+            throw TextInsertionError.axWriteFailed(code: selectResult.rawValue)
+        }
+
+        // Step 6: 写入 replacement——目标应用替换选中内容
+        let writeResult = AXUIElementSetAttributeValue(
+            axElement,
+            kAXSelectedTextAttribute as CFString,
+            replacement as CFTypeRef
+        )
+        guard writeResult == .success else {
+            Log.textIO.error("AXUIElement replace write failed: AXError(rawValue: \(writeResult.rawValue))")
+            throw TextInsertionError.axWriteFailed(code: writeResult.rawValue)
+        }
+
+        Log.textIO.info("AXUIElement: replaced \"\(original)\" → \"\(replacement)\" at range \(foundRange.location)-\(foundRange.length)")
+    }
 }
 
 // MARK: - CompositeTextIO
@@ -295,5 +387,10 @@ final class CompositeTextIO: TextIOProtocol {
     /// 若 primary 失败（如无聚焦应用），抛错让调用方处理。
     func readContext() async throws -> String {
         try await primary.readContext()
+    }
+
+    /// 精确替换委托给 primary——只有 AX 桥能精确定位替换。
+    func replaceText(original: String, replacement: String) async throws {
+        try await primary.replaceText(original: original, replacement: replacement)
     }
 }

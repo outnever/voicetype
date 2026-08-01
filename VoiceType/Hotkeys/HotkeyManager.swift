@@ -180,6 +180,8 @@ final class HotkeyManager: @unchecked Sendable {
                 DispatchQueue.main.async {
                     guard let self, self.isFnDown else { return }
                     self.fnLongPressFired = true
+                    // 先结束可能仍在运行的系统听写（Esc 是系统听写的结束键）
+                    self.dismissSystemDictation()
                     Log.hotkey.info("Fn 长按触发——开始纠错录音")
                     self.onFnLongPress?()
                     self.coordinator?.onCorrectionKeyPress?()
@@ -233,6 +235,25 @@ final class HotkeyManager: @unchecked Sendable {
         }
 
         return false
+    }
+
+    // MARK: - 系统听写处理
+
+    /// 结束可能仍在运行的系统听写（macOS 听写用 Esc 或再次双击 Fn 结束）。
+    ///
+    /// 场景：用户正在系统听写中，长按 Fn 触发纠错——此时系统听写仍会接收
+    /// 麦克风输入并把纠错指令也打进输入框。注入一次 Esc 让它先结束。
+    /// 注入到 `.cghidEventTap`（HID 层），系统听写服务能收到。
+    private func dismissSystemDictation() {
+        let escapeKeyCode: CGKeyCode = 53  // kVK_Escape
+        guard let source = CGEventSource(stateID: .hidSystemState) else { return }
+
+        let keyDown = CGEvent(keyboardEventSource: source, virtualKey: escapeKeyCode, keyDown: true)
+        let keyUp = CGEvent(keyboardEventSource: source, virtualKey: escapeKeyCode, keyDown: false)
+
+        keyDown?.post(tap: .cghidEventTap)
+        keyUp?.post(tap: .cghidEventTap)
+        Log.hotkey.info("已注入 Esc——结束系统听写（如有）")
     }
 
     // MARK: - Watchdog

@@ -142,6 +142,11 @@ private final class MockSuccessBridge: TextIOProtocol {
     func isPasswordField() -> Bool { isPasswordFieldReturnValue }
 
     func readContext() async throws -> String { "mock context" }
+
+    func replaceText(original: String, replacement: String) async throws {
+        insertCallCount += 1
+        lastInsertedText = replacement
+    }
 }
 
 /// Mock bridge that always throws — used to test the fallback path.
@@ -160,6 +165,10 @@ private final class MockFailingBridge: TextIOProtocol {
     func isPasswordField() -> Bool { isPasswordFieldReturnValue }
 
     func readContext() async throws -> String { "" }
+
+    func replaceText(original: String, replacement: String) async throws {
+        throw errorToThrow
+    }
 }
 
 /// Mock bridge that tracks whether it was called — used as fallback.
@@ -180,6 +189,14 @@ private final class MockTrackingBridge: TextIOProtocol {
     func isPasswordField() -> Bool { isPasswordFieldReturnValue }
 
     func readContext() async throws -> String { "mock context" }
+
+    func replaceText(original: String, replacement: String) async throws {
+        insertCallCount += 1
+        lastInsertedText = replacement
+        if shouldThrow {
+            throw TextInsertionError.allStrategiesFailed
+        }
+    }
 }
 
 // MARK: - CompositeTextIO Tests
