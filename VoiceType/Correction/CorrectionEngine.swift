@@ -176,8 +176,10 @@ final class CorrectionEngine {
         let systemPrompt = """
         你是一个文本纠错助手。用户会提供一段文字（上下文）和一条纠错指令。
         请找到需要修改的精确原文片段，并给出替换后的内容。
-        只返回 JSON，不要返回其他内容：
-        {"edits": [{"original": "需要修改的原文片段（必须与上下文中完全一致的子串）", "replacement": "替换后的内容", "reason": "修改原因（一句话）"}]}
+        只输出 JSON，格式如下（参考示例）：
+        {"edits": [{"original": "需要修改的原文片段", "replacement": "替换后的内容", "reason": "修改原因（一句话）"}]}
+        示例输出：
+        {"edits": [{"original": "可不可以输啊", "replacement": "可不可以输入啊", "reason": "漏了入字"}]}
         规则：
         - original 必须是上下文中真实存在的子串，逐字匹配（包括乱码字符，必须原样复制，不可修改）
         - 每个 original 取最小的独立片段——批量操作（如"去掉所有乱码"）拆成多个编辑，每个乱码片段一个编辑
@@ -207,6 +209,7 @@ final class CorrectionEngine {
                 ["role": "user", "content": userPrompt],
             ],
             "temperature": 0.1,
+            "max_tokens": 1024,  // 防止 JSON 被截断（DeepSeek 官方 JSON 模式要求）
             "response_format": ["type": "json_object"],
         ]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
@@ -229,7 +232,9 @@ final class CorrectionEngine {
         }
 
         let chat = try JSONDecoder().decode(ChatResponse.self, from: data)
-        guard let content = chat.choices.first?.message.content else {
+        guard let content = chat.choices.first?.message.content, !content.isEmpty else {
+            // DeepSeek 官方提示：JSON 模式偶尔返回空 content——提示用户重试
+            Log.app.warning("LLM returned empty content (JSON mode known issue)")
             throw CorrectionError.emptyResponse
         }
 
