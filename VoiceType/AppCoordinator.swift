@@ -311,11 +311,9 @@ final class AppCoordinator: ObservableObject {
                         return
                     }
 
-                    // 插入修正文本
-                    try await self.textIO.insertText(corrected.replacementText)
-
+                    // 替换已在 CorrectionEngine 内部完成（精确替换，不重复插入）
                     self.resetToIdle()
-                    Log.app.info("Correction complete: \"\(corrected.replacementText)\"")
+                    Log.app.info("Correction complete: \(corrected.message)")
                 } catch {
                     Log.app.error("Correction failed: \(error)")
                     self.state = .error("纠错失败: \(error.localizedDescription)")

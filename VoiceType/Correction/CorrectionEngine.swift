@@ -95,8 +95,8 @@ final class CorrectionEngine {
         }
         Log.app.info("Correction using provider: \(config.displayName) (\(config.model))")
 
-        // 3. 调用大模型，获取结构化纠错
-        let edit = try await requestEdit(
+        // 3. 调用大模型，获取结构化纠错（可能多个编辑）
+        let edits = try await requestEdit(
             providerKey: providerKey,
             config: config,
             apiKey: apiKey,
@@ -104,32 +104,43 @@ final class CorrectionEngine {
             instruction: instruction
         )
 
-        // 4. 验证 original 片段在上下文中存在（防幻觉）
-        guard context.contains(edit.original), !edit.original.isEmpty else {
-            Log.app.warning("LLM returned original not found in context: \"\(edit.original)\"")
+        guard !edits.isEmpty else {
             return CorrectionResult(
                 success: false,
                 replacementText: "",
-                message: "大模型返回的原文片段在上下文中不存在——请再试一次"
+                message: "大模型未返回任何修改"
             )
         }
 
-        // 5. 精确替换：只替换 original 片段，其他内容原样保留
-        do {
-            try await textIO.replaceText(original: edit.original, replacement: edit.replacement)
-        } catch {
-            Log.app.error("Replace failed: \(error)")
+        // 4. 逐条验证并执行替换（每个 original 必须逐字存在于上下文，防幻觉）
+        var appliedCount = 0
+        for edit in edits {
+            guard context.contains(edit.original), !edit.original.isEmpty else {
+                Log.app.warning("LLM returned original not found in context: \"\(edit.original.prefix(50))\"")
+                continue
+            }
+
+            do {
+                try await textIO.replaceText(original: edit.original, replacement: edit.replacement)
+                appliedCount += 1
+                Log.app.info("Correction #\(appliedCount): \"\(edit.original.prefix(30))\" → \"\(edit.replacement.prefix(30))\" (\(edit.reason))")
+            } catch {
+                Log.app.error("Replace failed for \"\(edit.original.prefix(30))\": \(error)")
+                continue
+            }
+        }
+
+        guard appliedCount > 0 else {
             return CorrectionResult(
                 success: false,
                 replacementText: "",
-                message: "替换失败——目标应用可能不支持精确替换（\(error.localizedDescription)）"
+                message: "大模型返回的原文片段在上下文中不存在——请换一种说法再试一次"
             )
         }
 
-        Log.app.info("Correction: \"\(edit.original)\" → \"\(edit.replacement)\" (\(edit.reason))")
         return CorrectionResult(
             success: true,
-            replacementText: edit.replacement,
+            replacementText: "已应用 \(appliedCount) 处修改",
             message: "已修正"
         )
     }
@@ -152,24 +163,27 @@ final class CorrectionEngine {
     // MARK: - LLM 调用
 
     /// 请求大模型返回结构化纠错（OpenAI 兼容 chat/completions API）。
+    /// - Returns: 纠错编辑数组（可能多个）。
     private func requestEdit(
         providerKey: String,
         config: ProviderConfig,
         apiKey: String,
         context: String,
         instruction: String
-    ) async throws -> CorrectionEdit {
+    ) async throws -> [CorrectionEdit] {
         let url = URL(string: config.baseURL + "/chat/completions")!
 
         let systemPrompt = """
         你是一个文本纠错助手。用户会提供一段文字（上下文）和一条纠错指令。
         请找到需要修改的精确原文片段，并给出替换后的内容。
         只返回 JSON，不要返回其他内容：
-        {"original": "需要修改的原文片段（必须与上下文中完全一致的子串）", "replacement": "替换后的内容", "reason": "修改原因（一句话）"}
+        {"edits": [{"original": "需要修改的原文片段（必须与上下文中完全一致的子串）", "replacement": "替换后的内容", "reason": "修改原因（一句话）"}]}
         规则：
-        - original 必须是上下文中真实存在的子串，逐字匹配
+        - original 必须是上下文中真实存在的子串，逐字匹配（包括乱码字符，必须原样复制，不可修改）
+        - 每个 original 取最小的独立片段——批量操作（如"去掉所有乱码"）拆成多个编辑，每个乱码片段一个编辑
         - 只修改用户要求的部分，不要改动其他内容
         - 如果指令是补充内容（如"加上逗号"），original 取受影响的最小片段
+        - 最多返回 10 个编辑
         """
 
         let userPrompt = """
@@ -220,8 +234,8 @@ final class CorrectionEngine {
         }
 
         // 解析纠错 JSON（content 可能包含 ```json 包裹、前后缀、或未转义控制字符）
-        let edit = try parseEditJSON(from: content)
-        return edit
+        let editResponse = try parseEditJSON(from: content)
+        return editResponse.edits
     }
 
     /// 从 LLM 返回的 content 中健壮地解析纠错 JSON。
@@ -232,7 +246,7 @@ final class CorrectionEngine {
     /// 1. 提取第一个 `{...}` 完整对象
     /// 2. 过滤非法控制字符（保留 \t \n \r）
     /// 3. 用宽松方式解析
-    private func parseEditJSON(from content: String) throws -> CorrectionEdit {
+    private func parseEditJSON(from content: String) throws -> CorrectionEditResponse {
         // 1. 去掉 markdown 包裹
         let cleaned = content
             .replacingOccurrences(of: "```json", with: "")
@@ -254,13 +268,20 @@ final class CorrectionEngine {
             return ascii >= 0x20 || ascii == 9 || ascii == 10 || ascii == 13
         }
 
-        // 4. 解析
+        // 4. 解析——先按 edits 数组格式，失败则兼容单编辑格式
         do {
             return try JSONDecoder().decode(
-                CorrectionEdit.self,
+                CorrectionEditResponse.self,
                 from: Data(filtered.utf8)
             )
         } catch {
+            // 兼容单编辑格式 {"original":..., "replacement":..., "reason":...}
+            if let single = try? JSONDecoder().decode(
+                CorrectionEdit.self,
+                from: Data(filtered.utf8)
+            ) {
+                return CorrectionEditResponse(edits: [single])
+            }
             Log.app.error("LLM JSON parse failed: \(error) — content: \(content.prefix(200))")
             throw CorrectionError.invalidResponse
         }
@@ -282,6 +303,11 @@ struct CorrectionEdit: Codable {
     let original: String
     let replacement: String
     let reason: String
+}
+
+/// 大模型返回的完整响应（支持多个编辑）。
+struct CorrectionEditResponse: Codable {
+    let edits: [CorrectionEdit]
 }
 
 // MARK: - 错误
