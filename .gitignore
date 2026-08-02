@@ -1,2 +1,8 @@
 .build/
 dist/
+api-keys.json
+*.pem
+*.p12
+.env
+.env.*
+credentials*
