@@ -79,10 +79,37 @@ final class ClipboardBridge: TextIOProtocol {
         false
     }
 
-    /// 剪贴板方案无法读取目标应用内容——返回空字符串。
-    /// 纠错功能需要读取上下文，因此剪贴板桥不支持纠错（由 CompositeTextIO 处理）。
+    /// 剪贴板读取回退：Cmd+A 全选 → Cmd+C 复制 → 读回剪贴板 → 恢复原剪贴板内容。
+    ///
+    /// 用于 AX 读取失败的应用（浏览器/Electron 自定义编辑器——PITFALLS.md §1）。
+    /// 副作用：目标应用会短暂处于"全选"状态（无法通过剪贴板恢复光标位置）。
+    /// 若目标应用没有可复制的文字，返回空字符串。
     func readContext() async throws -> String {
-        ""
+        let pasteboard = NSPasteboard.general
+
+        // Step 1: Save original clipboard content
+        let originalString = pasteboard.string(forType: .string)
+        // 清空剪贴板，保证"复制到了空"与"没复制到"可区分
+        pasteboard.clearContents()
+        try await Task.sleep(nanoseconds: 100_000_000)
+
+        // Step 2: Select all + copy
+        simulateCommandA()
+        try await Task.sleep(nanoseconds: 150_000_000)
+        simulateCommandC()
+        try await Task.sleep(nanoseconds: 250_000_000)
+
+        // Step 3: Read the copied text
+        let copied = pasteboard.string(forType: .string) ?? ""
+
+        // Step 4: Restore original clipboard content
+        pasteboard.clearContents()
+        if let original = originalString {
+            pasteboard.setString(original, forType: .string)
+        }
+
+        Log.textIO.info("ClipboardBridge: read \(copied.count) chars via select-all + copy")
+        return copied
     }
 
     /// 剪贴板方案无法精确定位替换片段——抛错。
@@ -145,6 +172,32 @@ final class ClipboardBridge: TextIOProtocol {
         if let aUp = CGEvent(keyboardEventSource: source, virtualKey: 0x00, keyDown: false) {
             aUp.flags = .maskCommand
             aUp.post(tap: .cghidEventTap)
+        }
+
+        if let cmdUp = CGEvent(keyboardEventSource: source, virtualKey: 0x37, keyDown: false) {
+            cmdUp.post(tap: .cghidEventTap)
+        }
+    }
+
+    // MARK: - Cmd+C Simulation
+
+    /// Simulate a Cmd+C keystroke (copy) via CGEvent post to `.cghidEventTap`.
+    private func simulateCommandC() {
+        let source = CGEventSource(stateID: .combinedSessionState)
+
+        if let cmdDown = CGEvent(keyboardEventSource: source, virtualKey: 0x37, keyDown: true) {
+            cmdDown.flags = .maskCommand
+            cmdDown.post(tap: .cghidEventTap)
+        }
+
+        if let cDown = CGEvent(keyboardEventSource: source, virtualKey: 0x08, keyDown: true) {
+            cDown.flags = .maskCommand
+            cDown.post(tap: .cghidEventTap)
+        }
+
+        if let cUp = CGEvent(keyboardEventSource: source, virtualKey: 0x08, keyDown: false) {
+            cUp.flags = .maskCommand
+            cUp.post(tap: .cghidEventTap)
         }
 
         if let cmdUp = CGEvent(keyboardEventSource: source, virtualKey: 0x37, keyDown: false) {

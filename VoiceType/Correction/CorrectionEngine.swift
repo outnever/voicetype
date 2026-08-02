@@ -24,7 +24,7 @@ final class CorrectionEngine {
         let message: String
     }
 
-    /// 供应商配置
+    /// 供应商配置（连接信息来自 Providers.swift；模型默认值可被用户设置覆盖）。
     private struct ProviderConfig {
         let displayName: String
         let baseURL: String
@@ -32,27 +32,20 @@ final class CorrectionEngine {
         let keychainKey: String
     }
 
-    /// 支持纠错的供应商（OpenAI 兼容 API）
-    private static let providers: [String: ProviderConfig] = [
-        "deepseek": ProviderConfig(
-            displayName: "DeepSeek",
-            baseURL: "https://api.deepseek.com/v1",
-            model: "deepseek-chat",
-            keychainKey: "deepseek"
-        ),
-        "openai": ProviderConfig(
-            displayName: "OpenAI",
-            baseURL: "https://api.openai.com/v1",
-            model: "gpt-4o-mini",
-            keychainKey: "openai"
-        ),
-        "openrouter": ProviderConfig(
-            displayName: "OpenRouter",
-            baseURL: "https://openrouter.ai/api/v1",
-            model: "deepseek/deepseek-chat-v3",
-            keychainKey: "openrouter"
-        ),
-    ]
+    /// 支持的纠错供应商（OpenAI 兼容 API）——模型列表由用户/运行时动态决定。
+    private static var providers: [String: ProviderConfig] {
+        Dictionary(uniqueKeysWithValues: Providers.all.map {
+            (
+                $0.id,
+                ProviderConfig(
+                    displayName: $0.displayName,
+                    baseURL: $0.baseURL,
+                    model: $0.defaultModel,
+                    keychainKey: $0.id
+                )
+            )
+        })
+    }
 
     /// 文本 I/O——读取/替换光标处文字
     private let textIO: TextIOProtocol
@@ -87,18 +80,48 @@ final class CorrectionEngine {
                 message: "未配置 API Key——请在偏好设置 → API 密钥中配置 DeepSeek 或其他供应商"
             )
         }
-        Log.app.info("Correction using provider: \(config.displayName) (\(config.model))")
+        let effectiveModel = ModelSettings.model(for: providerKey) ?? config.model
+        Log.app.info("Correction using provider: \(config.displayName) (\(effectiveModel))")
 
-        // 3. 调用大模型，获取结构化纠错（双模式：edits / full_text）
+        // 3. 调用大模型，获取结构化纠错（三模式：edits / full_text / insert）
         let response = try await requestEdit(
             providerKey: providerKey,
             config: config,
+            model: ModelSettings.model(for: providerKey) ?? config.model,
             apiKey: apiKey,
             context: context,
             instruction: instruction
         )
 
         // 4. 根据模式分发执行
+        if response.mode == "insert" {
+            // 新增内容：在光标处插入，保留上下文所有已有内容。
+            // 与 full_text 的关键区别：绝不删除已有文本。
+            guard let insertText = response.insert_text, !insertText.isEmpty else {
+                return CorrectionResult(
+                    success: false,
+                    replacementText: "",
+                    message: "大模型未返回要插入的内容"
+                )
+            }
+            do {
+                try await textIO.insertText(insertText)
+                Log.app.info("Insert mode applied: \(insertText.count) chars at cursor")
+                return CorrectionResult(
+                    success: true,
+                    replacementText: insertText,
+                    message: "已插入"
+                )
+            } catch {
+                Log.app.error("Insert mode failed: \(error)")
+                return CorrectionResult(
+                    success: false,
+                    replacementText: "",
+                    message: "插入失败——请确认目标应用已获得焦点（\(error.localizedDescription)）"
+                )
+            }
+        }
+
         if response.mode == "full_text" {
             // 全文性操作：整体替换（全选 → 写入新文本）。
             // 注意：full_text 可能为空字符串（"把全部内容删掉"）——空串是合法结果。
@@ -186,9 +209,16 @@ final class CorrectionEngine {
 
     // MARK: - 供应商选择
 
-    /// 选择可用的供应商：优先 DeepSeek，其次用户已配置的。
+    /// 选择可用的供应商：优先用户显式选择的，其次按默认优先级 DeepSeek → OpenAI → OpenRouter。
     private func resolveProvider() -> (String, ProviderConfig, String)? {
-        // 按优先顺序尝试
+        // 用户显式选择的供应商（若已配置 Key）
+        if let active = ProviderSettings.active,
+           let config = Self.providers[active],
+           let apiKey = keyStore.retrieveQuiet(key: config.keychainKey), !apiKey.isEmpty {
+            return (active, config, apiKey)
+        }
+
+        // 默认优先级
         let priorityOrder = ["deepseek", "openai", "openrouter"]
         for key in priorityOrder {
             guard let config = Self.providers[key] else { continue }
@@ -202,10 +232,11 @@ final class CorrectionEngine {
     // MARK: - LLM 调用
 
     /// 请求大模型返回结构化纠错（OpenAI 兼容 chat/completions API）。
-    /// - Returns: 纠错响应（双模式）。
+    /// - Returns: 纠错响应（三模式）。
     private func requestEdit(
         providerKey: String,
         config: ProviderConfig,
+        model: String,
         apiKey: String,
         context: String,
         instruction: String
@@ -223,9 +254,9 @@ final class CorrectionEngine {
         模式二：全文性操作（去掉所有多余空行/清理全部乱码/整体格式化/批量替换同一类内容）
         输出：{"mode": "full_text", "full_text": "处理后的完整文本", "reason": "处理说明"}
 
-        模式三：新增内容（上下文为空或很短，用户要求"写/添加/插入XX内容"）
-        输出：{"mode": "full_text", "full_text": "要写入的内容", "reason": "新增内容说明"}
-        示例：{"mode": "full_text", "full_text": "天青色等烟雨，而我在等你……", "reason": "根据指令生成歌词"}
+        模式三：新增内容（用户要求"写/添加/插入XX内容"——不管上下文是否为空，都在光标处插入，不删除任何已有内容）
+        输出：{"mode": "insert", "insert_text": "要插入的光标处新内容", "reason": "新增内容说明"}
+        示例：{"mode": "insert", "insert_text": "天青色等烟雨，而我在等你……", "reason": "根据指令在光标处插入歌词"}
 
         【重要】纠错指令是语音识别结果，可能包含同音字/近似音错误。
         例如用户说"把块变成慢"，可能被识别成"把快变成卖"。
@@ -235,7 +266,7 @@ final class CorrectionEngine {
         规则：
         - 局部修改时：original 必须是上下文中真实存在的子串，逐字匹配（包括乱码字符，必须原样复制，不可修改）；每个 original 取最小的独立片段；最多 10 个编辑
         - 全文性操作时：full_text 是完整文本的替换，可自由重排/清理，但不得改变用户没要求的语义内容
-        - 新增内容时：full_text 是全新内容（要插入的文字），上下文为空也正常
+        - 新增内容时：insert_text 是全新内容，插入到光标处，上下文的已有内容一个字都不能删；"追加/插入/添加/写一段"等指令都属于此类
         - 全文性操作和新增内容不要用 edits 模式（几十个片段会超出长度限制）
         - 只修改用户要求的部分
         """
@@ -248,6 +279,9 @@ final class CorrectionEngine {
         \(instruction)
         """
 
+        // 记录发往大模型的完整输入，便于排查纠错问题（含同音字误判等）。
+        Log.app.info("LLM request (provider: \(config.displayName), model: \(model)):\n--- system ---\n\(systemPrompt)\n--- user ---\n\(userPrompt)")
+
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
@@ -255,7 +289,7 @@ final class CorrectionEngine {
         request.timeoutInterval = 30
 
         let body: [String: Any] = [
-            "model": config.model,
+            "model": model,
             "messages": [
                 ["role": "system", "content": systemPrompt],
                 ["role": "user", "content": userPrompt],
@@ -289,6 +323,9 @@ final class CorrectionEngine {
             Log.app.warning("LLM returned empty content (JSON mode known issue)")
             throw CorrectionError.emptyResponse
         }
+
+        // 记录大模型返回的原始内容，便于排查解析/输出问题。
+        Log.app.info("LLM response (provider: \(config.displayName), model: \(model)):\n\(content)")
 
         // 解析纠错 JSON（content 可能包含 ```json 包裹、前后缀、或未转义控制字符）
         let editResponse = try parseEditJSON(from: content)
@@ -369,14 +406,16 @@ struct CorrectionEdit: Codable {
     let reason: String
 }
 
-/// 大模型返回的完整响应（双模式：edits 局部修改 / full_text 全文性操作）。
+/// 大模型返回的完整响应（三模式：edits 局部修改 / full_text 全文性操作 / insert 新增插入）。
 struct CorrectionEditResponse: Codable {
-    /// "edits" 或 "full_text"
+    /// "edits"、"full_text" 或 "insert"
     var mode: String?
     /// 局部修改的编辑列表
     var edits: [CorrectionEdit]?
     /// 全文性操作的处理后完整文本
     var full_text: String?
+    /// 新增内容模式下要插入到光标处的文本
+    var insert_text: String?
     /// 处理说明
     var reason: String?
 }

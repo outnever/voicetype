@@ -465,10 +465,24 @@ final class CompositeTextIO: TextIOProtocol {
         primary.isPasswordField()
     }
 
-    /// 读取上下文委托给 primary——只有 AX 桥能读取目标应用内容。
-    /// 若 primary 失败（如无聚焦应用），抛错让调用方处理。
+    /// 读取上下文：AX 优先，失败回退剪贴板（Cmd+A+Cmd+C 读回），全部失败返回空串。
+    ///
+    /// 修复 Web 应用场景（浏览器/Electron 自定义编辑器不暴露 AX 文本元素）：
+    /// AX 读取失败不再整体抛错，而是走剪贴板读回退；彻底失败时降级为空上下文，
+    /// 让"新增内容"类指令仍可在光标处插入。
     func readContext() async throws -> String {
-        try await primary.readContext()
+        do {
+            return try await primary.readContext()
+        } catch {
+            Log.textIO.warning("AX readContext failed (\(error)). Falling back to clipboard read.")
+        }
+
+        do {
+            return try await fallback.readContext()
+        } catch {
+            Log.textIO.error("All readContext strategies failed — returning empty context: \(error)")
+        }
+        return ""
     }
 
     /// 精确替换委托给 primary——只有 AX 桥能精确定位替换。

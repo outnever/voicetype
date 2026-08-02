@@ -40,19 +40,7 @@ final class AppleSpeechService: ObservableObject {
             isAuthorized = true
             return true
         case .notDetermined:
-            // 注意：TCC 的 completion handler 在后台队列调用。
-            // 不能在 handler 里直接 continuation.resume——resume 触发 MainActor
-            // 隔离断言（_dispatch_assert_queue → swift_task_checkIsolatedSwift），
-            // Swift 6.3 工具链下直接 SIGTRAP 崩溃（实测）。
-            // 先跳到主队列再 resume：主队列即 MainActor 执行器，断言通过。
-            let granted = await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
-                SFSpeechRecognizer.requestAuthorization { status in
-                    let authorized = (status == .authorized)
-                    DispatchQueue.main.async {
-                        continuation.resume(returning: authorized)
-                    }
-                }
-            }
+            let granted = await Self.requestSpeechAuthorizationFromTCC()
             isAuthorized = granted
             return granted
         case .denied, .restricted:
@@ -60,6 +48,22 @@ final class AppleSpeechService: ObservableObject {
             return false
         @unknown default:
             return false
+        }
+    }
+
+    /// 在 nonisolated 上下文里调用 SFSpeechRecognizer.requestAuthorization。
+    ///
+    /// 为什么必须 nonisolated：TCC 的 completion handler 在后台队列调用。若闭包字面量
+    /// 写在 @MainActor 上下文里，Swift 6 会令闭包继承 MainActor 隔离，后台队列回调时
+    /// 在闭包入口即触发隔离断言（swift_task_isCurrentExecutorWithFlagsImpl →
+    /// dispatch_assert_queue → SIGTRAP，实测 macOS 26 / Swift 6.3 崩溃）。
+    /// 整个方法 nonisolated 后，闭包在此处创建、不继承隔离，从任意线程回调都安全；
+    /// continuation.resume 会把 awaiting 的任务调度回调用方的 MainActor 上下文。
+    nonisolated static func requestSpeechAuthorizationFromTCC() async -> Bool {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
+            SFSpeechRecognizer.requestAuthorization { status in
+                continuation.resume(returning: status == .authorized)
+            }
         }
     }
 

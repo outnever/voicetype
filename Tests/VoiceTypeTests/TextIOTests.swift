@@ -216,6 +216,21 @@ private final class MockTrackingBridge: TextIOProtocol {
     }
 }
 
+/// Mock bridge whose readContext always throws — used to test the read fallback chain.
+private final class MockReadFailingBridge: TextIOProtocol {
+    func insertText(_ text: String) async throws {}
+
+    func isPasswordField() -> Bool { false }
+
+    func readContext() async throws -> String {
+        throw TextInsertionError.noFocusedApp
+    }
+
+    func replaceText(original: String, replacement: String) async throws {}
+
+    func replaceAllText(_ newText: String) async throws {}
+}
+
 // MARK: - CompositeTextIO Tests
 
 @Suite("CompositeTextIO")
@@ -312,6 +327,39 @@ struct CompositeTextIOTests {
 
         let composite = CompositeTextIO(primary: primary, fallback: fallback)
         #expect(composite.isPasswordField(), "Should delegate to primary.isPasswordField()")
+    }
+
+    @Test("readContext uses primary when AX read succeeds")
+    func readContextUsesPrimaryWhenItSucceeds() async throws {
+        let primary = MockSuccessBridge()
+        let fallback = MockTrackingBridge()
+
+        let composite = CompositeTextIO(primary: primary, fallback: fallback)
+        let context = try await composite.readContext()
+
+        #expect(context == "mock context", "Should read from primary when it succeeds")
+    }
+
+    @Test("readContext falls back to clipboard when AX read fails")
+    func readContextFallsBackToClipboard() async throws {
+        let primary = MockReadFailingBridge()
+        let fallback = MockTrackingBridge()
+
+        let composite = CompositeTextIO(primary: primary, fallback: fallback)
+        let context = try await composite.readContext()
+
+        #expect(context == "mock context", "Should fall back to clipboard read when AX fails")
+    }
+
+    @Test("readContext returns empty string when all strategies fail (degrade, not throw)")
+    func readContextReturnsEmptyWhenAllFail() async throws {
+        let primary = MockReadFailingBridge()
+        let fallback = MockReadFailingBridge()
+
+        let composite = CompositeTextIO(primary: primary, fallback: fallback)
+        let context = try await composite.readContext()
+
+        #expect(context.isEmpty, "Should degrade to empty context instead of throwing")
     }
 
     @Test("CompositeTextIO deinit — both bridges still valid after composite is gone")

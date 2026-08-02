@@ -47,5 +47,6 @@ enum Defaults {
         static let selectedLLMProvider = "com.voicetype.selectedLLMProvider"
         static let whisperModelVariant = "com.voicetype.whisperModelVariant"
         static let dictationLanguage = "com.voicetype.dictationLanguage"
+        static let onboardingCompleted = "com.voicetype.onboardingCompleted"
     }
 }

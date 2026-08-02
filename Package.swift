@@ -23,7 +23,8 @@ let package = Package(
                 .product(name: "OpenAI", package: "OpenAI"),
                 .product(name: "Logging", package: "swift-log"),
             ],
-            path: "VoiceType"
+            path: "VoiceType",
+            exclude: ["Info.plist"]
         ),
         .testTarget(
             name: "VoiceTypeTests",

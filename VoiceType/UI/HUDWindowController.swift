@@ -45,7 +45,8 @@ final class HUDWindowController: NSWindowController {
         window.backgroundColor = .clear
         window.hasShadow = true
         window.alphaValue = 0.9
-        window.isMovableByWindowBackground = false
+        // 允许按住面板空白处拖动到任意位置（按钮/滚动区仍正常响应点击）
+        window.isMovableByWindowBackground = true
 
         // 将 SwiftUI 视图嵌入 NSWindow
         window.contentView = NSHostingView(

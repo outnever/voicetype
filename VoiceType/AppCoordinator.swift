@@ -13,6 +13,9 @@ import Combine
 final class AppCoordinator: ObservableObject {
     // MARK: - Published State
 
+    /// 供 AppDelegate 等非 SwiftUI 环境访问当前实例（仅用于启动引导等一次性场景）。
+    nonisolated(unsafe) static weak var shared: AppCoordinator?
+
     /// Current application lifecycle state
     @Published var state: AppState = .idle
 
@@ -36,6 +39,74 @@ final class AppCoordinator: ObservableObject {
 
     /// 最近一次修正的结果信息（HUD 常驻显示）。
     @Published var lastCorrectionMessage: String = ""
+
+    /// 状态面板的操作历史（最近的输入与操作，最多保留 40 条）。
+    @Published var operationHistory: [OperationLogItem] = []
+
+    /// 最近一次错误信息——状态面板底部条显示，几秒后自动隐藏。
+    @Published var currentError: String?
+
+    /// 是否启用 VoiceType 功能（停用时不响应热键，应用保持运行）。
+    @Published var isEnabled: Bool = true
+
+    /// 启用/停用 VoiceType。
+    /// - 停用：注销热键、停止进行中的录音，菜单栏图标切换为「已停用」。
+    /// - 启用：重新注册热键（需权限已就绪）。
+    func setEnabled(_ enabled: Bool) {
+        guard isEnabled != enabled else { return }
+        isEnabled = enabled
+
+        if enabled {
+            iconName = "mic.fill"
+            state = .idle
+            statusMessage = "就绪"
+            registerHotkeysIfReady(
+                mic: permissionManager.microphoneGranted,
+                ax: permissionManager.accessibilityGranted
+            )
+            Log.app.info("VoiceType 已启用")
+        } else {
+            hotkeyManager.unregister()
+            hotkeyTapActive = false
+
+            // 停用进行中的纠错录音
+            if isCorrecting {
+                audioCapture.onAudioBuffer = nil
+                audioCapture.stop()
+                isCorrecting = false
+            }
+            state = .idle
+            iconName = "mic.slash"
+            statusMessage = "已停用"
+            hudController.hide()
+            Log.app.info("VoiceType 已停用")
+        }
+    }
+
+    /// 记录一条操作到状态面板历史；isError 时同时更新当前错误条。
+    func recordOperation(_ message: String, isError: Bool = false) {
+        operationHistory.insert(
+            OperationLogItem(timestamp: Date(), message: message, isError: isError),
+            at: 0
+        )
+        if operationHistory.count > 40 {
+            operationHistory.removeLast()
+        }
+
+        if isError {
+            currentError = message
+            errorHideTimer?.cancel()
+            errorHideTimer = Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 6_000_000_000)
+                if !Task.isCancelled {
+                    currentError = nil
+                }
+            }
+        }
+    }
+
+    /// 当前错误条的自动隐藏计时器。
+    private var errorHideTimer: Task<Void, Never>?
 
     // MARK: - Subsystem Instances
 
@@ -126,6 +197,7 @@ final class AppCoordinator: ObservableObject {
         // Create TranscriptionService with shared ModelDownloadManager reference.
         // Must be initialized before any `self` reference (Swift strict init requirements).
         self.transcriptionService = TranscriptionService(modelDownloadManager: self.modelDownloadManager)
+        Self.shared = self
 
         Log.app.info("AppCoordinator initializing — menu bar icon set to '\(self.iconName)'")
 
@@ -242,6 +314,7 @@ final class AppCoordinator: ObservableObject {
             self.lastCorrectionMessage = ""
             self.hudController.show()
             SoundManager.playStartSound()
+            self.recordOperation("开始纠错")
             Log.app.info("Starting correction instruction recording")
 
             Task { @MainActor in
@@ -251,6 +324,16 @@ final class AppCoordinator: ObservableObject {
                     self.statusMessage = "需要语音识别权限"
                     self.hudController.hide()
                     self.isCorrecting = false
+                    return
+                }
+
+                // 关键竞态修复：授权弹窗可能阻塞在等待用户操作，而用户在此期间
+                // 已经松开了 Fn（onFnReleaseAfterLongPress 已执行并复位 isCorrecting）。
+                // 若此时仍继续启动录音，麦克风会被打开且永远不会停止
+                // （释放回调已跑过，没人再关它）→ 系统麦克风指示器常驻。
+                // 会话已结束则直接放弃，绝不在释放后启动录音。
+                guard self.isCorrecting else {
+                    Log.app.warning("User released Fn during auth dialog — aborting audio start")
                     return
                 }
 
@@ -295,11 +378,14 @@ final class AppCoordinator: ObservableObject {
 
                 guard !instruction.isEmpty else {
                     self.lastCorrectionMessage = "未识别到指令——请长按 Fn 再说一次"
+                    self.recordOperation("未识别到指令——请重试", isError: true)
                     self.hudController.show()
                     self.resetToIdle()
                     Log.app.info("Empty instruction — no correction performed")
                     return
                 }
+
+                self.recordOperation("指令：\(instruction)")
 
                 do {
                     // 读取光标处上下文 + 执行大模型纠错
@@ -312,6 +398,7 @@ final class AppCoordinator: ObservableObject {
                         self.iconName = "mic.fill"
                         self.statusMessage = "纠错失败"
                         self.lastCorrectionMessage = "❌ \(corrected.message)"
+                        self.recordOperation("纠错失败：\(corrected.message)", isError: true)
                         self.hudController.show()
                         self.isCorrecting = false
                         try? await Task.sleep(nanoseconds: 5_000_000_000)
@@ -323,6 +410,7 @@ final class AppCoordinator: ObservableObject {
 
                     // 替换已在 CorrectionEngine 内部完成（精确替换，不重复插入）
                     self.lastCorrectionMessage = "✓ \(corrected.message)"
+                    self.recordOperation("✓ \(corrected.message)")
                     self.hudController.show()
                     SoundManager.playCompleteSound()
                     self.resetToIdle()
@@ -333,6 +421,7 @@ final class AppCoordinator: ObservableObject {
                     self.iconName = "mic.fill"
                     self.statusMessage = "纠错失败"
                     self.lastCorrectionMessage = "❌ 纠错失败: \(error.localizedDescription)"
+                    self.recordOperation("纠错失败：\(error.localizedDescription)", isError: true)
                     self.hudController.show()
                     SoundManager.playErrorSound()
                     self.isCorrecting = false

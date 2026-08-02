@@ -1,9 +1,11 @@
 import AVFoundation
 import ApplicationServices
 import Foundation
+import Speech
 
 /// Manages macOS TCC (Transparency, Consent, and Control) permission status for
-/// microphone and accessibility. Publishes status changes via @Published for UI binding.
+/// microphone, speech recognition, and accessibility. Publishes status changes
+/// via @Published for UI binding.
 ///
 /// Permissions are checked sequentially per D-07 decision: microphone first (with
 /// user-facing explanation), then accessibility (requiring manual System Settings
@@ -12,6 +14,10 @@ import Foundation
 final class PermissionManager: ObservableObject {
     @Published var microphoneGranted: Bool = false
     @Published var accessibilityGranted: Bool = false
+
+    /// 语音识别权限（Apple SFSpeechRecognizer）——纠错指令识别需要。
+    @Published var speechRecognitionGranted: Bool = false
+    @Published var speechRecognitionStatus: String = "未请求"
 
     /// Pre-configured polling timer for accessibility permission.
     /// AXIsProcessTrusted() has no notification callback — we must poll.
@@ -113,6 +119,37 @@ final class PermissionManager: ObservableObject {
         // Accessibility: AXIsProcessTrusted() is also synchronous
         accessibilityGranted = AXIsProcessTrusted()
         Log.permission.info("初始辅助功能状态: \(accessibilityGranted ? "已授权" : "未授权")")
+
+        refreshSpeechStatus()
+    }
+
+    // MARK: - Speech Recognition Permission
+
+    /// 刷新语音识别权限状态（SFSpeechRecognizer，同步查询）。
+    func refreshSpeechStatus() {
+        let status = SFSpeechRecognizer.authorizationStatus()
+        speechRecognitionGranted = (status == .authorized)
+        switch status {
+        case .authorized:
+            speechRecognitionStatus = "已授权"
+        case .denied:
+            speechRecognitionStatus = "已拒绝"
+        case .restricted:
+            speechRecognitionStatus = "受限"
+        case .notDetermined:
+            speechRecognitionStatus = "未请求"
+        @unknown default:
+            speechRecognitionStatus = "未知"
+        }
+    }
+
+    /// 请求语音识别权限——内部使用 AppleSpeechService 的非隔离调用（避免 Swift 6 隔离断言崩溃）。
+    /// - Returns: true 表示已授权
+    func requestSpeechRecognitionPermission() async -> Bool {
+        let granted = await AppleSpeechService.requestSpeechAuthorizationFromTCC()
+        refreshSpeechStatus()
+        Log.permission.info("语音识别权限请求结果: \(granted ? "granted" : "denied")")
+        return granted
     }
 }
 

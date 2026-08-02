@@ -16,7 +16,12 @@
 - `correct()` 遇到 `mode == "insert"` 时调用 `textIO.insertText(insert_text)`，在光标处插入、保留原文
 - （可选）`readContext()` 同时返回光标位置，供插入/上下文边界判断
 
-**状态**：待处理
+**状态**：✅ 已解决（2026-08-01）
+
+**实际解决方案**：
+- LLM 提示词把「新增内容」改为模式三 `insert` → `{"mode":"insert","insert_text":"..."}`，明确"添加/插入/追加/写一段"类指令无论上下文空不空都走 insert
+- `CorrectionEditResponse` 新增 `insert_text` 字段（向后兼容）
+- `CorrectionEngine.correct()` 处理 `mode == "insert"`：调 `textIO.insertText()` 在光标处插入，不删除已有内容
 
 ## 2026-08-01：Web 应用（opencode web）中纠错失败——无法定位当前应用
 
@@ -33,5 +38,10 @@
 - 给读路径加剪贴板回退：Cmd+A 全选 → Cmd+C 复制 → 读回 → 恢复选区（`ClipboardBridge` 增加 `readContext()`）
 - 把 `readContext()` 失败从"硬失败"降级为"空上下文"，让"新增内容"类指令仍可在光标处插入（配合 insert 模式修复）
 
-**状态**：待处理
+**状态**：✅ 已解决（2026-08-01）
+
+**实际解决方案**：
+- `ClipboardBridge.readContext()`：Cmd+A 全选 → Cmd+C 复制 → 读回 → 恢复原剪贴板
+- `CompositeTextIO.readContext()`：AX 优先 → 失败回退剪贴板 → 彻底失败返回空串（不抛错），使新增内容指令仍可在光标处插入
+- 注：Web 应用中"精确替换"仍受限于 AX（replaceText 无剪贴板等价物），insert 与听写可用
 

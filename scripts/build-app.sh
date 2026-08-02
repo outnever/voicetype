@@ -38,8 +38,12 @@ cat > "$CONTENTS/Info.plist" << 'PLIST'
 <dict>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>zh_CN</string>
+	<key>CFBundleDisplayName</key>
+	<string>VoiceType</string>
 	<key>CFBundleExecutable</key>
 	<string>VoiceType</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
 	<key>CFBundleIdentifier</key>
 	<string>com.voicetype.app</string>
 	<key>CFBundleInfoDictionaryVersion</key>
@@ -49,13 +53,17 @@ cat > "$CONTENTS/Info.plist" << 'PLIST'
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.0.0</string>
+	<string>0.1</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>14.0</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.productivity</string>
 	<key>LSUIElement</key>
 	<true/>
+	<key>NSHumanReadableCopyright</key>
+	<string>© 2026 VoiceType. MIT License.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>VoiceType 需要用麦克风将你说的转化成文字。录音仅在按住热键时进行。</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
@@ -65,14 +73,19 @@ cat > "$CONTENTS/Info.plist" << 'PLIST'
 PLIST
 echo "  Info.plist 已写入"
 
-# 5. 生成图标（SF Symbol 转 PNG → iconset → icns）
+# 5. 生成图标（优先 AI 母版 assets/AppIcon-master.png，否则用程序化生成兜底）
 echo "▶ 生成应用图标..."
-ICON_PY="$ROOT/scripts/gen-icon.py"
-if [ -f "$ICON_PY" ]; then
-    python3 "$ICON_PY" "$RESOURCES"
-    echo "  图标: $RESOURCES/AppIcon.icns"
+if [ -f "$ROOT/assets/AppIcon-master.png" ]; then
+    "$ROOT/scripts/make-icns-from-png.sh" "$ROOT/assets/AppIcon-master.png" "$RESOURCES"
+    echo "  图标(AI 母版): $RESOURCES/AppIcon.icns"
 else
-    echo "  ⚠ 无图标脚本，跳过（可后续补充）"
+    ICON_PY="$ROOT/scripts/gen-icon.py"
+    if [ -f "$ICON_PY" ]; then
+        python3 "$ICON_PY" "$RESOURCES"
+        echo "  图标(程序化): $RESOURCES/AppIcon.icns"
+    else
+        echo "  ⚠ 无图标脚本，跳过（可后续补充）"
+    fi
 fi
 
 # 6. ad-hoc 签名（本机运行 + 测试机右键打开即可）
